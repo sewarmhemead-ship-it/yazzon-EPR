@@ -5,10 +5,11 @@
  */
 
 import { app } from './app.js';
-import { env } from './config/env.js';
 
 const HOST = '0.0.0.0';
+const PORT = process.env.PORT || 8080;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
-app.listen(env.port, HOST, () => {
-  console.log(`[server] يعمل على ${HOST}:${env.port} (${env.nodeEnv})`);
+app.listen(PORT, HOST, () => {
+  console.log(`[server] يعمل بنجاح على المنفذ ${PORT} (${HOST}, ${NODE_ENV})`);
 });
