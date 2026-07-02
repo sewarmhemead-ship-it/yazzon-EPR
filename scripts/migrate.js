@@ -9,9 +9,42 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { pool } from '../src/config/db.js';
+import 'dotenv/config';
+import pg from 'pg';
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../migrations', import.meta.url));
+const { Client } = pg;
+
+/**
+ * يقرأ DATABASE_URL مباشرة من بيئة العملية قبل أي محاولة اتصال.
+ * السبب: Railway يشغّل هذا السكربت في preDeploy؛ نريد خطأً صريحاً إن لم تصل
+ * متغيرات Railway بدلاً من محاولة اتصال مضللة على localhost.
+ * @returns {string}
+ */
+function readDatabaseUrl() {
+  const databaseUrl = process.env.DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    console.error(
+      '[migrate] DATABASE_URL غير موجود أو فارغ. أضفه في Railway → Service → Variables قبل إعادة النشر.',
+    );
+    console.error('[migrate] لن يحاول السكربت الاتصال بقاعدة بيانات افتراضية أو localhost.');
+    process.exit(1);
+  }
+  return databaseUrl;
+}
+
+/**
+ * يطبع وجهة الاتصال بدون كشف كلمة المرور.
+ * @param {string} databaseUrl
+ */
+function logDatabaseTarget(databaseUrl) {
+  try {
+    const parsed = new URL(databaseUrl);
+    console.log(`[migrate] DATABASE_URL موجود. الاتصال بـ ${parsed.hostname}:${parsed.port || '5432'}/${parsed.pathname.replace(/^\//, '')}`);
+  } catch {
+    console.log('[migrate] DATABASE_URL موجود، لكن تعذر تحليل الوجهة للطباعة.');
+  }
+}
 
 /** يضمن وجود جدول تتبّع الـ migrations المطبّقة. */
 async function ensureMigrationsTable(client) {
@@ -30,7 +63,14 @@ async function loadApplied(client) {
 }
 
 async function main() {
-  const client = await pool.connect();
+  const databaseUrl = readDatabaseUrl();
+  logDatabaseTarget(databaseUrl);
+
+  const client = new Client({
+    connectionString: databaseUrl,
+  });
+
+  await client.connect();
   try {
     await ensureMigrationsTable(client);
     const applied = await loadApplied(client);
@@ -60,8 +100,7 @@ async function main() {
     }
     console.log(count === 0 ? 'لا migrations جديدة.' : `اكتمل: ${count} migration.`);
   } finally {
-    client.release();
-    await pool.end();
+    await client.end();
   }
 }
 
