@@ -1,0 +1,61 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test-and-build:
+    name: Unit, integration, stress, frontend build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: yazoon_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d yazoon_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/yazoon_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/yazoon_test
+      SUPABASE_JWT_SECRET: ci-test-jwt-secret-do-not-use-in-prod
+      CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Run preflight test suite
+        run: npm run ci
+
+      - name: Upload frontend production artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yazoon-frontend-dist
+          path: frontend/dist
+          if-no-files-found: error

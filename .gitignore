@@ -1,0 +1,19 @@
+# الأسرار — لا يُرفَع أبداً (القسم 2: كل الأسرار في .env)
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# التبعيات والمخرجات
+node_modules/
+dist/
+build/
+coverage/
+
+# سجلات وأنظمة
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
