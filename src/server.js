@@ -7,6 +7,8 @@
 import { app } from './app.js';
 import { env } from './config/env.js';
 
-app.listen(env.port, () => {
-  console.log(`[server] يعمل على http://localhost:${env.port} (${env.nodeEnv})`);
+const HOST = '0.0.0.0';
+
+app.listen(env.port, HOST, () => {
+  console.log(`[server] يعمل على ${HOST}:${env.port} (${env.nodeEnv})`);
 });
