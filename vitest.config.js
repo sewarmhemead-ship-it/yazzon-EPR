@@ -1,6 +1,8 @@
 /**
  * vitest.config.js
- * إعداد الاختبارات (القسم 9). setupFiles يضبط بيئة الاختبار قبل تحميل أي وحدة تقرأ env.
+ * Test setup (CLAUDE.md section 9). setupFiles configures the environment
+ * before any module that reads env is loaded. File parallelism is disabled
+ * because the database-backed suites share one schema.
  */
 
 import { defineConfig } from 'vitest/config';

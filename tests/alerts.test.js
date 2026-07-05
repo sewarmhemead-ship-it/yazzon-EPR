@@ -1,12 +1,13 @@
 /**
  * alerts.test.js
- * اختبارات المرحلة 4 (التنبيهات) — القسم 9 الاختبار #8، إضافةً لمنطق is_ordered (القسم 7).
- * تتطلّب قاعدة PostgreSQL حيّة عبر TEST_DATABASE_URL؛ تُتخطّى الحزمة إن تعذّر الاتصال.
+ * Phase 4 tests (alerts) — section 9 test 8, plus the is_ordered lifecycle
+ * (section 7). Requires a live PostgreSQL via TEST_DATABASE_URL; skipped
+ * locally when unreachable.
  *
- * التغطية:
- *   [8] التنبيهات: الاستعلام يُرجع بالضبط العناصر current_stock <= min_stock_level.
- *   - الترتيب: is_ordered ASC ثم الأشدّ نقصاً أولاً (القسم 10).
- *   - is_ordered: يُعلَّم عند الطلب، ويعود false تلقائياً عند الاستلام (addStock) (القسم 7).
+ * Coverage:
+ *   [8] the query returns exactly the items with current_stock <= min_stock_level.
+ *   - Ordering: is_ordered ASC, then largest shortfall first (section 10).
+ *   - is_ordered: set when ordering, reset automatically on receipt (addStock).
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
@@ -24,14 +25,14 @@ import { addStock } from '../src/modules/transactions/transactions.service.js';
 
 const dbReady = await canConnectToTestDatabase();
 if (!dbReady) {
-  handleMissingTestDatabase('alerts.test', 'تخطّي اختبارات التنبيهات.');
+  handleMissingTestDatabase('alerts.test', 'Skipping alert suites.');
 }
 
-/** يزرع عنصراً ويعيد صفّه. */
+/** Seeds an item and returns its row. */
 async function seedItem({ name, currentStock, minStock, isOrdered = false }) {
   const { rows } = await pool.query(
     `INSERT INTO items (name, unit, current_stock, min_stock_level, is_ordered)
-     VALUES ($1, 'كجم', $2, $3, $4) RETURNING *`,
+     VALUES ($1, 'kg', $2, $3, $4) RETURNING *`,
     [name, currentStock, minStock, isOrdered],
   );
   return rows[0];
@@ -41,12 +42,12 @@ async function seedUser() {
   const id = randomUUID();
   await pool.query(
     'INSERT INTO users (id, name, email, role) VALUES ($1, $2, $3, $4)',
-    [id, 'مستخدم', `${id}@test.com`, 'admin'],
+    [id, 'Test User', `${id}@test.com`, 'admin'],
   );
   return id;
 }
 
-describe.skipIf(!dbReady)('التنبيهات (alerts)', () => {
+describe.skipIf(!dbReady)('alerts', () => {
   beforeAll(async () => {
     await resetTestSchema();
   });
@@ -55,33 +56,33 @@ describe.skipIf(!dbReady)('التنبيهات (alerts)', () => {
     await truncateCoreTables();
   });
 
-  it('[8] يُرجع بالضبط العناصر عند/تحت الحدّ الأدنى فقط', async () => {
-    await seedItem({ name: 'تحت الحد', currentStock: '1', minStock: '5' }); // منخفض
-    await seedItem({ name: 'عند الحد', currentStock: '5', minStock: '5' }); // منخفض (<=)
-    await seedItem({ name: 'فوق الحد', currentStock: '9', minStock: '5' }); // ليس منخفضاً
+  it('[8] returns exactly the items at or below their minimum', async () => {
+    await seedItem({ name: 'below-min', currentStock: '1', minStock: '5' }); // low
+    await seedItem({ name: 'at-min', currentStock: '5', minStock: '5' }); // low (<=)
+    await seedItem({ name: 'above-min', currentStock: '9', minStock: '5' }); // fine
 
     const items = await listAlerts();
     const names = items.map((i) => i.name);
 
-    expect(names).toContain('تحت الحد');
-    expect(names).toContain('عند الحد');
-    expect(names).not.toContain('فوق الحد');
+    expect(names).toContain('below-min');
+    expect(names).toContain('at-min');
+    expect(names).not.toContain('above-min');
     expect(items).toHaveLength(2);
   });
 
-  it('الترتيب: غير المطلوب قبل المطلوب، ثم الأشدّ نقصاً أولاً', async () => {
-    await seedItem({ name: 'مطلوب', currentStock: '0', minStock: '5', isOrdered: true }); // نقص 5 لكنه مطلوب
-    await seedItem({ name: 'نقص قليل', currentStock: '4', minStock: '5' }); // نقص 1
-    await seedItem({ name: 'نقص كبير', currentStock: '1', minStock: '5' }); // نقص 4
+  it('orders unordered before ordered, then largest shortfall first', async () => {
+    await seedItem({ name: 'ordered', currentStock: '0', minStock: '5', isOrdered: true }); // shortfall 5 but ordered
+    await seedItem({ name: 'small-shortfall', currentStock: '4', minStock: '5' }); // shortfall 1
+    await seedItem({ name: 'big-shortfall', currentStock: '1', minStock: '5' }); // shortfall 4
 
     const items = await listAlerts();
 
-    // is_ordered=false أولاً، وبينها الأشدّ نقصاً أولاً؛ المطلوب أخيراً.
-    expect(items.map((i) => i.name)).toEqual(['نقص كبير', 'نقص قليل', 'مطلوب']);
+    // is_ordered=false first, largest shortfall first among them; ordered last.
+    expect(items.map((i) => i.name)).toEqual(['big-shortfall', 'small-shortfall', 'ordered']);
   });
 
-  it('markOrdered يعلّم العنصر ويضبط last_ordered_at', async () => {
-    const item = await seedItem({ name: 'سكر', currentStock: '1', minStock: '5' });
+  it('markOrdered sets the flag and stamps last_ordered_at', async () => {
+    const item = await seedItem({ name: 'sugar', currentStock: '1', minStock: '5' });
 
     const updated = await markOrdered(item.id, true);
 
@@ -89,19 +90,19 @@ describe.skipIf(!dbReady)('التنبيهات (alerts)', () => {
     expect(updated.last_ordered_at).not.toBeNull();
   });
 
-  it('markOrdered لعنصر غير موجود → NotFound', async () => {
+  it('markOrdered on a missing item throws NotFound', async () => {
     await expect(markOrdered(randomUUID(), true)).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
   });
 
-  it('is_ordered يعود false تلقائياً عند الاستلام (addStock) — القسم 7', async () => {
+  it('is_ordered resets automatically on receipt (addStock) — section 7', async () => {
     const user = await seedUser();
     const item = await seedItem({
-      name: 'حليب',
+      name: 'milk',
       currentStock: '1',
       minStock: '5',
-      isOrdered: true, // طُلب سابقاً
+      isOrdered: true, // previously ordered
     });
 
     const { item: received } = await addStock({
@@ -110,7 +111,7 @@ describe.skipIf(!dbReady)('التنبيهات (alerts)', () => {
       quantity: '10',
     });
 
-    // وصلت التوصيلة → لم يعد "مطلوباً"، والرصيد ارتفع.
+    // The delivery arrived: no longer "ordered", balance increased.
     expect(received.is_ordered).toBe(false);
     expect(received.current_stock).toBe('11');
   });

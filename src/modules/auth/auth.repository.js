@@ -1,17 +1,16 @@
 /**
  * auth.repository.js
- * الطبقة: repository — استعلامات SQL الخاصة بالمصادقة فقط. لا منطق أعمال.
- * القاعدة (القسم 2): كل SQL يدوي و parameterized عبر node-postgres.
+ * Layer: repository — SQL for authentication only. No business logic.
+ * All SQL is hand-written and parameterized via node-postgres (section 2).
  */
 
 import { query } from '../../config/db.js';
 
 /**
- * يجلب المستخدم بمعرّفه (نفس معرّف Supabase Auth) من جدول users.
- * السبب: نربط هوية التوكن بصفّ users لقراءة الدور (RBAC). لا نعيد أعمدة زائدة.
- * @param {string} id معرّف المستخدم (uuid) من حقل sub في التوكن.
+ * Fetches a user by id (same id as Supabase Auth) to resolve the role for
+ * RBAC. Only the columns the middleware needs are selected.
+ * @param {string} id User id (uuid, the token's `sub` claim).
  * @returns {Promise<{ id: string, name: string, email: string, role: string } | null>}
- *   صفّ المستخدم أو null إن لم يوجد.
  */
 export async function findUserById(id) {
   const { rows } = await query(

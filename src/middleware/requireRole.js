@@ -1,22 +1,22 @@
 /**
  * requireRole.js
- * الطبقة: middleware — التحكم بالوصول حسب الدور (RBAC).
- * المسؤولية: السماح فقط للأدوار المصرّح لها بمسار ما. يُركّب بعد requireAuth.
- * (القسم 2: الحماية مسؤولية Express — RLS مُطفأة.)
+ * Layer: middleware — role-based access control (RBAC).
+ * Restricts a route to the given roles; must run after requireAuth.
+ * (CLAUDE.md section 2: authorization lives in Express — RLS is disabled.)
  */
 
 import { ForbiddenError, UnauthorizedError } from '../shared/errors.js';
 
 /**
- * مصنع middleware يقصر الوصول على الأدوار المسموحة.
- * السبب: نفصل "من أنت" (requireAuth) عن "هل يحقّ لك" (requireRole) ليعاد استخدام
- * القاعدة على أي مسار admin دون تكرار منطق الفحص.
- * @param {...string} allowedRoles الأدوار المسموح لها (مثل 'admin').
+ * Middleware factory limiting access to the allowed roles. Kept separate from
+ * requireAuth so "who are you" and "may you do this" stay independent and the
+ * rule can be reused on any admin route without duplicating checks.
+ * @param {...string} allowedRoles Roles permitted through (e.g. 'admin').
  * @returns {import('express').RequestHandler}
  */
 export function requireRole(...allowedRoles) {
   return (req, _res, next) => {
-    // يجب أن يكون requireAuth قد سبق هذا الـ middleware ووضع req.user.
+    // requireAuth must have run first and populated req.user.
     if (!req.user) {
       return next(new UnauthorizedError());
     }

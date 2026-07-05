@@ -1,12 +1,13 @@
 /**
  * items.controller.js
- * الطبقة: controller — HTTP فقط: يقرأ الطلب، يستدعي الـ service، يعيد الرد. لا منطق أعمال.
- * الأخطاء تُمرَّر عبر next(err) إلى errorHandler المركزي.
+ * Layer: controller — HTTP only: read the request, call the service, send the
+ * response. No business logic. Errors are forwarded to the central
+ * errorHandler via next(err).
  */
 
 import { getItems, getItem, addItem, editItem } from './items.service.js';
 
-/** قائمة كل العناصر. */
+/** Lists all items. */
 export async function listAll(_req, res, next) {
   try {
     const items = await getItems();
@@ -16,7 +17,7 @@ export async function listAll(_req, res, next) {
   }
 }
 
-/** عنصر واحد بمعرّفه. */
+/** Returns a single item by id. */
 export async function getOne(req, res, next) {
   try {
     const item = await getItem(req.params.id);
@@ -26,7 +27,7 @@ export async function getOne(req, res, next) {
   }
 }
 
-/** إنشاء عنصر جديد. */
+/** Creates a new item. */
 export async function create(req, res, next) {
   try {
     const { name, unit, minStockLevel, categoryId, locationId } = req.body ?? {};
@@ -37,7 +38,7 @@ export async function create(req, res, next) {
   }
 }
 
-/** تعديل بيانات عنصر (وصفية فقط). */
+/** Updates an item's metadata. */
 export async function update(req, res, next) {
   try {
     const { name, unit, minStockLevel, categoryId, locationId } = req.body ?? {};

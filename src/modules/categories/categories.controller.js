@@ -1,11 +1,11 @@
 /**
  * categories.controller.js
- * الطبقة: controller — HTTP فقط. لا منطق أعمال.
+ * Layer: controller — HTTP only. No business logic.
  */
 
 import { getCategories, addCategory } from './categories.service.js';
 
-/** قائمة التصنيفات. */
+/** Lists all categories. */
 export async function listAll(_req, res, next) {
   try {
     const categories = await getCategories();
@@ -15,7 +15,7 @@ export async function listAll(_req, res, next) {
   }
 }
 
-/** إنشاء تصنيف. */
+/** Creates a category. */
 export async function create(req, res, next) {
   try {
     const category = await addCategory(req.body?.name);

@@ -1,5 +1,7 @@
 /**
- * Login.jsx — شاشة تسجيل الدخول. تعرض بطاقة بيانات العرض في DEMO_MODE فقط.
+ * Login.jsx — sign-in screen (email + password via Supabase).
+ * Shows a demo-credentials card in demo mode only, and a clear configuration
+ * hint when Supabase environment variables are missing.
  */
 
 import { useState } from 'react';

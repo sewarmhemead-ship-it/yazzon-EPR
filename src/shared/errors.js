@@ -1,78 +1,79 @@
 /**
  * errors.js
- * الطبقة: shared — أصناف أخطاء المجال.
- * المسؤولية: أخطاء ذات معنى تُرمى من الـ service، ويحوّلها errorHandler المركزي لردود HTTP.
- * السبب (القسم 6/بند 5): لا try/catch يبتلع الأخطاء بصمت؛ كل خطأ يحمل statusCode + code واضحين.
+ * Layer: shared — domain error classes.
+ * Services throw these; the central errorHandler converts them to HTTP
+ * responses (section 6, rule 5: no try/catch may swallow errors silently).
+ * Clients localize by `code`; `message` is for developers and logs.
  */
 
 /**
- * الأساس لكل أخطاء التطبيق المتوقّعة (أخطاء عمل، لا أعطال برمجية).
- * @property {number} statusCode رمز HTTP المناسب.
- * @property {string} code رمز آلي ثابت للعميل/الاختبارات.
+ * Base class for all expected application errors (business failures, not bugs).
+ * @property {number} statusCode HTTP status to respond with.
+ * @property {string} code Stable machine-readable code for clients and tests.
  */
 export class AppError extends Error {
   /**
-   * @param {string} message رسالة موجّهة للمستخدم/المطوّر.
-   * @param {number} statusCode رمز HTTP.
-   * @param {string} code رمز آلي ثابت.
+   * @param {string} message Developer-facing description.
+   * @param {number} statusCode HTTP status.
+   * @param {string} code Stable machine-readable code.
    */
   constructor(message, statusCode, code) {
     super(message);
     this.name = this.constructor.name;
     this.statusCode = statusCode;
     this.code = code;
-    // نميّز الأخطاء المتوقّعة (التشغيلية) عن الأعطال البرمجية عند المعالجة المركزية.
+    // Distinguishes expected (operational) errors from programming bugs.
     this.isOperational = true;
   }
 }
 
-/** مورد غير موجود → 404. */
+/** Resource not found → 404. */
 export class NotFoundError extends AppError {
   /** @param {string} [message] */
-  constructor(message = 'المورد غير موجود') {
+  constructor(message = 'Resource not found') {
     super(message, 404, 'NOT_FOUND');
   }
 }
 
-/** مدخلات طلب غير صالحة → 400. */
+/** Invalid request input → 400. */
 export class ValidationError extends AppError {
   /** @param {string} [message] */
-  constructor(message = 'مدخلات غير صالحة') {
+  constructor(message = 'Invalid input') {
     super(message, 400, 'VALIDATION_ERROR');
   }
 }
 
 /**
- * رصيد غير كافٍ لإتمام السحب → 409.
- * تُرمى عندما يعيد الـ UPDATE الشرطي الذرّي صفر صفوف [INV-1] (المرحلة 3).
+ * Not enough stock to complete a withdrawal → 409.
+ * Thrown when the atomic conditional UPDATE returns zero rows [INV-1].
  */
 export class InsufficientStockError extends AppError {
   /** @param {string} [message] */
-  constructor(message = 'الرصيد غير كافٍ لإتمام العملية') {
+  constructor(message = 'Insufficient stock for this operation') {
     super(message, 409, 'INSUFFICIENT_STOCK');
   }
 }
 
-/** هوية غير موثّقة → 401. */
+/** Unauthenticated → 401. */
 export class UnauthorizedError extends AppError {
   /** @param {string} [message] */
-  constructor(message = 'مطلوب تسجيل الدخول') {
+  constructor(message = 'Authentication required') {
     super(message, 401, 'UNAUTHORIZED');
   }
 }
 
-/** موثّق لكن بلا صلاحية → 403 (RBAC، المرحلة 2). */
+/** Authenticated but not allowed → 403 (RBAC). */
 export class ForbiddenError extends AppError {
   /** @param {string} [message] */
-  constructor(message = 'لا تملك صلاحية لهذا الإجراء') {
+  constructor(message = 'Not allowed to perform this action') {
     super(message, 403, 'FORBIDDEN');
   }
 }
 
 /**
- * يبني جسم رد خطأ HTTP الموحّد. مصدر واحد لشكل الرد حتى لا يتكرّر بناؤه في عدّة أماكن.
- * @param {string} code رمز آلي ثابت.
- * @param {string} message رسالة للعميل.
+ * Builds the uniform HTTP error body so its shape lives in exactly one place.
+ * @param {string} code Stable machine-readable code.
+ * @param {string} message Human-readable message.
  * @returns {{ error: { code: string, message: string } }}
  */
 export function errorBody(code, message) {

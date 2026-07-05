@@ -1,15 +1,10 @@
 /**
  * app.js
- * الطبقة: تركيب (composition) — يبني تطبيق Express ويربط الـ middleware والـ modules.
- * المسؤولية: تجميع القطع فقط. لا منطق أعمال هنا.
- * يُصدَّر app دون listen ليتمكّن supertest من اختباره مباشرةً (القسم 9).
+ * Layer: composition — builds the Express app and wires middleware + modules.
+ * Assembly only; no business logic. The app is exported without listening so
+ * supertest can drive it directly (CLAUDE.md section 9).
  *
- * ترتيب الـ modules لاحقاً:
- *   المرحلة 2: auth      → app.use('/api/auth', ...)
- *   المرحلة 3: transactions → app.use('/api/transactions', ...)
- *   المرحلة 1+: items    → app.use('/api/items', ...)
- *   المرحلة 4: alerts    → app.use('/api/alerts', ...)
- * errorHandler يبقى دائماً آخر شيء بعد كل المسارات.
+ * The central errorHandler must always stay last, after every route.
  */
 
 import express from 'express';
@@ -34,20 +29,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const frontendDist = path.resolve(__dirname, '../frontend/dist');
 const frontendIndex = path.join(frontendDist, 'index.html');
 
-// السماح للواجهة (مناشئ Vite) بالوصول عبر CORS مع ترويسة Authorization.
+// Allow the frontend origins (Vite dev server) with the Authorization header.
 app.use(cors({ origin: env.corsOrigins }));
 
-// تحليل أجسام JSON للطلبات.
 app.use(express.json());
 
-// فحص صحّة بسيط للتأكد أن الخادم حيّ (لا يمسّ قاعدة البيانات).
+// Liveness probe; does not touch the database.
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// مسار للتطوير فقط لتوليد JWT في وضع العرض (لا يعمل خارج DEMO_MODE).
+// Development-only login that mints JWTs for the demo accounts.
+// Never mounted unless DEMO_MODE=true (local demos with the in-memory DB).
 if (process.env.DEMO_MODE === 'true') {
-  // حسابات العرض الوحيدة المقبولة — أي بريد آخر أو كلمة مرور خاطئة → 401 (كسلوك مصادقة حقيقي).
   const DEMO_ACCOUNTS = {
     'admin@demo.com': { id: '11111111-1111-1111-1111-111111111111', role: 'admin' },
     'staff@demo.com': { id: '22222222-2222-2222-2222-222222222222', role: 'staff' },
@@ -57,6 +51,7 @@ if (process.env.DEMO_MODE === 'true') {
   app.post('/api/demo/login', (req, res) => {
     const { email, password } = req.body ?? {};
     const account = DEMO_ACCOUNTS[email];
+    // Unknown emails and wrong passwords are rejected, mirroring real auth.
     if (!account || password !== DEMO_PASSWORD) {
       return res
         .status(401)
@@ -71,15 +66,16 @@ if (process.env.DEMO_MODE === 'true') {
   });
 }
 
-// --- ربط الـ modules ---
-app.use('/api/auth', authRoutes); // المرحلة 2
-app.use('/api/items', itemsRoutes); // المرحلة 1+ (items API)
-app.use('/api/categories', categoriesRoutes); // التصنيفات (Brot, Käse, Belag …)
-app.use('/api/locations', locationsRoutes); // الأقسام/البرادات (Kühlschränke)
-app.use('/api/transactions', transactionsRoutes); // المرحلة 3
-app.use('/api/alerts', alertsRoutes); // المرحلة 4
+// Feature modules.
+app.use('/api/auth', authRoutes);
+app.use('/api/items', itemsRoutes);
+app.use('/api/categories', categoriesRoutes);
+app.use('/api/locations', locationsRoutes);
+app.use('/api/transactions', transactionsRoutes);
+app.use('/api/alerts', alertsRoutes);
 
-// في الإنتاج يخدم Express واجهة React المبنية، بحيث يعمل Railway كتطبيق واحد.
+// In production Express also serves the built React frontend, so the whole
+// app runs as a single service (Railway) on one domain.
 if (env.nodeEnv === 'production' && existsSync(frontendIndex)) {
   app.use(express.static(frontendDist));
   app.get('*', (req, res, next) => {
@@ -90,10 +86,10 @@ if (env.nodeEnv === 'production' && existsSync(frontendIndex)) {
   });
 }
 
-// مسار غير موجود → رد 404 موحّد.
+// Unknown route → uniform 404 body.
 app.use((_req, res) => {
-  res.status(404).json(errorBody('NOT_FOUND', 'المسار غير موجود'));
+  res.status(404).json(errorBody('NOT_FOUND', 'Route not found'));
 });
 
-// معالج الأخطاء المركزي — يجب أن يكون آخر middleware (القسم 6/بند 5).
+// Central error handler — must remain the last middleware (section 6, rule 5).
 app.use(errorHandler);

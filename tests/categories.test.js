@@ -1,6 +1,7 @@
 /**
  * categories.test.js
- * اختبارات categories API. تتطلّب قاعدة PostgreSQL حيّة عبر TEST_DATABASE_URL؛ تُتخطّى إن تعذّر.
+ * categories API tests. Requires a live PostgreSQL via TEST_DATABASE_URL;
+ * skipped locally when unreachable.
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
@@ -15,7 +16,7 @@ import { getCategories, addCategory } from '../src/modules/categories/categories
 
 const dbReady = await canConnectToTestDatabase();
 if (!dbReady) {
-  handleMissingTestDatabase('categories.test', 'تخطّي اختبارات التصنيفات.');
+  handleMissingTestDatabase('categories.test', 'Skipping category suites.');
 }
 
 describe.skipIf(!dbReady)('categories API', () => {
@@ -27,17 +28,17 @@ describe.skipIf(!dbReady)('categories API', () => {
     await truncateCoreTables();
   });
 
-  it('addCategory: ينشئ تصنيفاً ويعيده', async () => {
+  it('addCategory creates and returns a category', async () => {
     const cat = await addCategory('Käse');
     expect(cat.name).toBe('Käse');
     expect(cat.id).toBeTruthy();
   });
 
-  it('addCategory: يرفض اسماً فارغاً', async () => {
+  it('addCategory rejects an empty name', async () => {
     await expect(addCategory('  ')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
-  it('getCategories: يعيد التصنيفات مرتّبة بالاسم', async () => {
+  it('getCategories returns categories sorted by name', async () => {
     await addCategory('Saucen');
     await addCategory('Brot & Gebäck');
     const cats = await getCategories();

@@ -1,10 +1,10 @@
 /**
  * alerts.routes.js
- * الطبقة: route — يربط مسارات التنبيهات بالـ controller وسلسلة الـ middleware. لا منطق.
+ * Layer: route — maps alert URLs to the controller and middleware chain.
  *
- * RBAC (القسم 1: المدير يرى التنبيهات ويدير العناصر):
- *   - عرض التنبيهات: متاح للموثّقين (staff + admin) — العامل يحتاج رؤية النقص.
- *   - تعليم/إلغاء "تم طلبه": admin فقط (قرار شراء).
+ * RBAC (section 1: the manager sees alerts and manages items):
+ *   - Viewing alerts: any authenticated user — staff need to see shortages.
+ *   - Marking/unmarking "ordered": admin only (purchasing decision).
  */
 
 import { Router } from 'express';

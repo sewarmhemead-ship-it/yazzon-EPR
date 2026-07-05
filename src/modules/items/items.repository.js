@@ -1,15 +1,15 @@
 /**
  * items.repository.js
- * الطبقة: repository — استعلامات SQL للعناصر فقط. لا منطق أعمال.
- * القاعدة (القسم 2): كل SQL يدوي و parameterized عبر node-postgres.
- * (تُوسَّع هذه الطبقة في مرحلة واجهة العناصر؛ الآن تكفي القراءة التي يحتاجها منطق الحركات.)
+ * Layer: repository — SQL for items only. No business logic.
+ * All SQL is hand-written and parameterized via node-postgres (section 2).
  */
 
 import { query } from '../../config/db.js';
 
 /**
- * يجلب كل العناصر مرتّبة بالاسم (لقائمة الواجهة)، مع اسم التصنيف والقسم إن وُجدا.
- * @returns {Promise<object[]>} صفوف العناصر (+ category_name, location_name).
+ * Lists all items ordered by name, with category and location names joined
+ * for display.
+ * @returns {Promise<object[]>} Item rows (+ category_name, location_name).
  */
 export async function listItems() {
   const { rows } = await query(
@@ -23,9 +23,9 @@ export async function listItems() {
 }
 
 /**
- * يجلب عنصراً بمعرّفه (قراءة عامة خارج المعاملة).
- * @param {string} id معرّف العنصر.
- * @returns {Promise<object | null>} صفّ العنصر أو null.
+ * Fetches an item by id (plain read outside any transaction).
+ * @param {string} id Item id.
+ * @returns {Promise<object | null>}
  */
 export async function findItemById(id) {
   const { rows } = await query('SELECT * FROM items WHERE id = $1', [id]);
@@ -33,14 +33,30 @@ export async function findItemById(id) {
 }
 
 /**
- * يُنشئ عنصراً جديداً. لا يقبل current_stock: كل رصيد يبدأ صفراً ويتغيّر عبر حركات مسجّلة
- * فقط [INV-3]. أي رصيد ابتدائي يُضاف بحركة in منفصلة.
+ * Fetches an item by id within an open transaction (using its client).
+ * Used only to distinguish "item not found" from "insufficient stock" after
+ * the atomic UPDATE failed — never to decide the decrement itself; that
+ * decision stays inside the conditional atomic UPDATE [INV-1].
+ * @param {import('pg').PoolClient} client Transaction client.
+ * @param {string} id Item id.
+ * @returns {Promise<object | null>}
+ */
+export async function findItemByIdTx(client, id) {
+  const { rows } = await client.query('SELECT * FROM items WHERE id = $1', [id]);
+  return rows[0] ?? null;
+}
+
+/**
+ * Creates an item. current_stock is intentionally not accepted: every balance
+ * starts at zero and changes only through ledger-recorded movements [INV-3].
+ * Any opening stock is booked as a separate "in" movement.
  * @param {object} data
  * @param {string} data.name
- * @param {string} data.unit الوحدة الأساسية [INV-6].
- * @param {string} data.minStockLevel حدّ التنبيه الأدنى (نصّ numeric) [INV-4].
+ * @param {string} data.unit Base unit [INV-6].
+ * @param {string} data.minStockLevel Alert threshold (decimal string) [INV-4].
  * @param {string|null} [data.categoryId]
- * @returns {Promise<object>} صفّ العنصر المُنشأ.
+ * @param {string|null} [data.locationId]
+ * @returns {Promise<object>} The created row.
  */
 export async function createItem({ name, unit, minStockLevel, categoryId, locationId }) {
   const { rows } = await query(
@@ -53,40 +69,43 @@ export async function createItem({ name, unit, minStockLevel, categoryId, locati
 }
 
 /**
- * يعدّل بيانات عنصر (وصفية فقط) دون المساس بـ current_stock [INV-3].
- * يستعمل COALESCE فيقبل تحديثاً جزئياً: الحقول غير المُمرَّرة (null) تبقى كما هي.
- * @param {string} id معرّف العنصر.
+ * Updates an item's metadata without ever touching current_stock [INV-3].
+ * Only keys present in `data` are changed; null is a real value for nullable
+ * metadata such as category_id/location_id, so callers can clear them.
+ * @param {string} id Item id.
  * @param {object} data
  * @param {string|null} [data.name]
  * @param {string|null} [data.unit]
  * @param {string|null} [data.minStockLevel]
  * @param {string|null} [data.categoryId]
- * @returns {Promise<object | null>} صفّ العنصر بعد التعديل، أو null إن لم يوجد.
+ * @param {string|null} [data.locationId]
+ * @returns {Promise<object | null>} Updated row, or null when not found.
  */
-export async function updateItem(id, { name, unit, minStockLevel, categoryId, locationId }) {
+export async function updateItem(id, data) {
+  const assignments = [];
+  const params = [id];
+
+  const pushAssignment = (column, value) => {
+    params.push(value);
+    assignments.push(`${column} = $${params.length}`);
+  };
+
+  if (Object.hasOwn(data, 'name')) pushAssignment('name', data.name);
+  if (Object.hasOwn(data, 'unit')) pushAssignment('unit', data.unit);
+  if (Object.hasOwn(data, 'minStockLevel')) pushAssignment('min_stock_level', data.minStockLevel);
+  if (Object.hasOwn(data, 'categoryId')) pushAssignment('category_id', data.categoryId);
+  if (Object.hasOwn(data, 'locationId')) pushAssignment('location_id', data.locationId);
+
+  if (assignments.length === 0) {
+    return findItemById(id);
+  }
+
   const { rows } = await query(
     `UPDATE items
-     SET name            = COALESCE($2, name),
-         unit            = COALESCE($3, unit),
-         min_stock_level = COALESCE($4, min_stock_level),
-         category_id     = COALESCE($5, category_id),
-         location_id     = COALESCE($6, location_id)
+     SET ${assignments.join(', ')}
      WHERE id = $1
      RETURNING *`,
-    [id, name ?? null, unit ?? null, minStockLevel ?? null, categoryId ?? null, locationId ?? null],
+    params,
   );
-  return rows[0] ?? null;
-}
-
-/**
- * يجلب عنصراً بمعرّفه ضمن معاملة قائمة (باستخدام عميلها).
- * يُستخدم فقط لتمييز "عنصر غير موجود" عن "رصيد غير كافٍ" بعد فشل UPDATE الذرّي —
- * لا يُستخدم أبداً لاتخاذ قرار الإنقاص (ذلك يبقى في UPDATE الشرطي الذرّي [INV-1]).
- * @param {import('pg').PoolClient} client عميل المعاملة.
- * @param {string} id معرّف العنصر.
- * @returns {Promise<object | null>} صفّ العنصر أو null.
- */
-export async function findItemByIdTx(client, id) {
-  const { rows } = await client.query('SELECT * FROM items WHERE id = $1', [id]);
   return rows[0] ?? null;
 }

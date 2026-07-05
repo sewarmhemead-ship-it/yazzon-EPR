@@ -1,13 +1,13 @@
 /**
  * categories.service.js
- * الطبقة: service — منطق أعمال التصنيفات (تحقّق المدخلات).
+ * Layer: service — category business logic (input validation).
  */
 
 import { assertNonEmptyString } from '../../shared/validate.js';
 import { listCategories, createCategory } from './categories.repository.js';
 
 /**
- * يعيد كل التصنيفات.
+ * Returns all categories.
  * @returns {Promise<object[]>}
  */
 export async function getCategories() {
@@ -15,10 +15,10 @@ export async function getCategories() {
 }
 
 /**
- * يُنشئ تصنيفاً بعد التحقق من الاسم.
+ * Creates a category after validating its name.
  * @param {string} name
  * @returns {Promise<object>}
- * @throws {ValidationError} لاسم فارغ.
+ * @throws {ValidationError} For an empty name.
  */
 export async function addCategory(name) {
   const clean = assertNonEmptyString(name, 'name');

@@ -1,18 +1,18 @@
 /**
  * locations.service.js
- * الطبقة: service — منطق أعمال الأقسام (تحقّق المدخلات).
+ * Layer: service — storage location business logic (input validation).
  */
 
 import { assertNonEmptyString } from '../../shared/validate.js';
 import { listLocations, createLocation } from './locations.repository.js';
 
-/** يعيد كل الأقسام. */
+/** Returns all locations. */
 export async function getLocations() {
   return listLocations();
 }
 
 /**
- * يُنشئ قسماً بعد التحقق.
+ * Creates a location after validation.
  * @param {string} name
  * @param {number} [position]
  */

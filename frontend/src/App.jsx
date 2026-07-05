@@ -1,6 +1,7 @@
 /**
- * App.jsx — الجذر: بوابة المصادقة + التنقّل + إشعارات (toast).
- * التبويبات: Übersicht (لوحة الصباح) / Bestand / Warnungen / Neu (المدير يرى الإنشاء).
+ * App.jsx — root component: auth gate, navigation, and toast notifications.
+ * Tabs: Übersicht (morning overview), Kühlung (fridges), Bestand, Warnungen,
+ * Verlauf (movement history).
  */
 
 import { useState, useCallback, useRef } from 'react';
@@ -21,6 +22,8 @@ const TABS = [
   { key: 'history', label: 'Verlauf', icon: 'history' },
 ];
 
+const TOAST_DURATION_MS = 3000;
+
 export default function App() {
   const { loading, session, profile, profileError, signOut } = useAuth();
   const [active, setActive] = useState('home');
@@ -30,7 +33,7 @@ export default function App() {
   const notify = useCallback((message, kind = 'success') => {
     setToast({ message, kind });
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 3000);
+    toastTimer.current = window.setTimeout(() => setToast(null), TOAST_DURATION_MS);
   }, []);
 
   if (loading) {
@@ -41,7 +44,7 @@ export default function App() {
     return <Login />;
   }
 
-  // جلسة صالحة لكن لا صفّ users مطابق (القرار 2-ب) → لا وصول.
+  // Valid session but no matching users row in the backend: access denied.
   if (session && !profile) {
     return (
       <div className="min-h-full grid place-items-center p-6 text-center">

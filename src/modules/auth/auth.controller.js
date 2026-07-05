@@ -1,11 +1,11 @@
 /**
  * auth.controller.js
- * الطبقة: controller — HTTP فقط لمسارات المصادقة. لا منطق أعمال.
+ * Layer: controller — HTTP only for auth routes. No business logic.
  */
 
 /**
- * يعيد بيانات المستخدم الموثّق حالياً (كما حمّلها requireAuth في req.user).
- * السبب: تتيح للواجهة معرفة الهوية والدور بعد تسجيل الدخول.
+ * Returns the currently authenticated user (as loaded by requireAuth),
+ * letting the frontend know the identity and role after sign-in.
  * @param {import('express').Request} req
  * @param {import('express').Response} res
  */

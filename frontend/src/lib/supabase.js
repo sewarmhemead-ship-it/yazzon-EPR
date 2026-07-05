@@ -1,6 +1,8 @@
 /**
- * supabase.js — عميل Supabase للواجهة (المصادقة فقط).
- * تم تعديله لدعم الوضع التجريبي (Demo Mode) بشكل كامل.
+ * supabase.js — Supabase client for the frontend (authentication only).
+ * supabase-js is allowed here; the CLAUDE.md ban applies to backend data
+ * access. In demo mode a minimal stand-in client talks to the local
+ * /api/demo/login endpoint instead of Supabase.
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -13,10 +15,11 @@ const apiUrl = import.meta.env.VITE_API_URL ?? '/api';
 export const isSupabaseConfigured = isDemoMode || Boolean(url && anonKey);
 
 if (!isSupabaseConfigured && !isDemoMode) {
-  console.warn('Supabase ist nicht konfiguriert — bitte VITE_SUPABASE_URL und VITE_SUPABASE_ANON_KEY setzen.');
+  console.warn('Supabase is not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
 }
 
-// إنشاء عميل وهمي للوضع التجريبي يحاكي عمل Supabase Auth
+// Demo stand-in mimicking the subset of supabase.auth the app uses.
+// State changes are handled via a full page reload, keeping it trivial.
 const demoClient = {
   auth: {
     signInWithPassword: async ({ email, password }) => {
@@ -24,15 +27,15 @@ const demoClient = {
         const res = await fetch(`${apiUrl}/demo/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+          body: JSON.stringify({ email, password }),
         });
         const data = await res.json();
-        if (!res.ok) return { error: { message: data.error?.message || 'Login failed' } };
+        if (!res.ok) return { error: { message: data.error?.message || 'Login fehlgeschlagen' } };
         localStorage.setItem('demo_token', data.access_token);
-        
-        // إعادة تحميل الصفحة لمحاكاة تسجيل الدخول وتحديث الـ AuthProvider
+
+        // Reload so AuthProvider picks up the new session state.
         setTimeout(() => window.location.reload(), 100);
-        
+
         return { data: { session: { access_token: data.access_token } }, error: null };
       } catch (e) {
         return { error: { message: e.message } };
@@ -46,11 +49,11 @@ const demoClient = {
       const token = localStorage.getItem('demo_token');
       return { data: { session: token ? { access_token: token } : null } };
     },
-    onAuthStateChange: (callback) => {
-      // In demo mode, we handle state changes via page reload, so this is just a dummy subscription
+    onAuthStateChange: () => {
+      // Demo mode signals state changes via page reload; no live subscription.
       return { data: { subscription: { unsubscribe: () => {} } } };
-    }
-  }
+    },
+  },
 };
 
 export const supabase = isDemoMode

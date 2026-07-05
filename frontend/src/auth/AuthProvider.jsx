@@ -1,7 +1,8 @@
 /**
- * AuthProvider.jsx — سياق المصادقة للواجهة.
- * يدير جلسة Supabase، ويجلب ملف المستخدم (الدور) من الـ backend عبر /auth/me،
- * ويوفّر signIn / signOut. الدور يحدّد ما تعرضه الواجهة (admin مقابل staff).
+ * AuthProvider.jsx — authentication context for the frontend.
+ * Manages the Supabase session, loads the user profile (role) from the
+ * backend via /auth/me, and exposes signIn/signOut. The role drives what the
+ * UI shows (admin vs staff).
  */
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
@@ -10,20 +11,20 @@ import { api } from '../lib/api.js';
 
 const AuthContext = createContext(null);
 
-/** يتيح استهلاك سياق المصادقة. */
+/** Access hook for the auth context. */
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth muss innerhalb von AuthProvider verwendet werden');
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null); // { id, name, email, role } من الـ backend
+  const [profile, setProfile] = useState(null); // { id, name, email, role } from the backend
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState(null);
 
-  // يجلب ملف المستخدم من الـ backend (يؤكّد وجود صفّ users ويعطي الدور).
+  // Loads the profile from the backend (confirms the users row and role).
   const loadProfile = useCallback(async () => {
     try {
       const { user } = await api.me();
@@ -40,19 +41,19 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
-    // الجلسة الابتدائية.
+    // Initial session.
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
     });
-    // متابعة تغيّرات الجلسة (دخول/خروج).
+    // Track session changes (sign-in/sign-out).
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
     });
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  // عند توفّر جلسة، اجلب الملف؛ وعند غيابها صفّره.
+  // Load the profile whenever a session appears; clear it when it goes away.
   useEffect(() => {
     if (session) {
       loadProfile();

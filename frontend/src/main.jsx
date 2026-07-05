@@ -1,5 +1,5 @@
 /**
- * main.jsx — نقطة دخول الواجهة. يركّب App داخل مزوّد المصادقة.
+ * main.jsx — frontend entry point. Mounts App inside the auth provider.
  */
 
 import { StrictMode } from 'react';

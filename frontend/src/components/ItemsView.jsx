@@ -79,8 +79,6 @@ export default function ItemsView({ notify }) {
   async function onChanged(tx, itemName) {
     rememberTx(tx, itemName);
     await load();
-    // حدّث نسخة الورقة المفتوحة بالبيانات الجديدة
-    setSheetItem((prev) => prev ? null : prev);
   }
 
   async function submitQuick({ quantity, type, note }) {

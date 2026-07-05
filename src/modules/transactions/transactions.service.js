@@ -1,12 +1,11 @@
 /**
  * transactions.service.js
- * الطبقة: service — منطق أعمال حركات المخزون + فرض الـ Invariants.
- * يفرض:
- *   [INV-1] لا رصيد سالب — عبر UPDATE شرطي ذرّي في الـ repository.
- *   [INV-2] كل حركة = معاملة DB واحدة — كل عملية ملفوفة بـ withTransaction.
- *   [INV-3] السجل ثابت — التصحيح = حركة عكسية جديدة تشير للأصلية، لا حذف/تعديل.
- *   [INV-4] الكميات numeric — تمرَّر كنصّ عشري بلا تحويل float (انظر validate.js).
- *   [INV-6] وحدة أساسية واحدة — كل الكميات بوحدة العنصر الأساسية.
+ * Layer: service — stock movement business logic; enforces the invariants:
+ *   [INV-1] no negative stock — via the conditional atomic UPDATE in the repository.
+ *   [INV-2] one DB transaction per movement — everything wrapped in withTransaction.
+ *   [INV-3] immutable ledger — corrections are new reversal rows, never edits.
+ *   [INV-4] numeric quantities — passed as decimal strings, no float math.
+ *   [INV-6] one base unit per item — all quantities use the item's unit.
  */
 
 import { withTransaction } from '../../shared/withTransaction.js';
@@ -31,7 +30,7 @@ import {
   listTransactions,
 } from './transactions.repository.js';
 
-/** أنواع الحركات (لا أرقام/نصوص سحرية متناثرة). */
+/** Movement types (single source, no scattered string literals). */
 export const TX_TYPE = Object.freeze({
   IN: 'in',
   OUT: 'out',
@@ -39,19 +38,25 @@ export const TX_TYPE = Object.freeze({
   ADJUSTMENT: 'adjustment',
 });
 
-/** الأنواع التي تُنقص الرصيد (سحب حقيقي من المخزون). */
+/** Types that withdraw stock. */
 const CONSUMING_TYPES = new Set([TX_TYPE.OUT, TX_TYPE.WASTE]);
 
+/** Maximum rows a single history request may return. */
+const HISTORY_MAX_LIMIT = 200;
+/** Default history page size. */
+const HISTORY_DEFAULT_LIMIT = 50;
+
 /**
- * يُدخل كمية إلى المخزون (استلام توصيلة) ويسجّلها كحركة in.
- * لماذا معاملة واحدة: تحديث الرصيد وتسجيل الحركة يجب أن ينجحا معاً [INV-2].
+ * Adds stock (goods receipt) and records it as an "in" movement.
+ * One transaction because the balance update and the ledger insert must
+ * succeed or fail together [INV-2].
  * @param {object} input
- * @param {string} input.itemId معرّف العنصر.
- * @param {string} input.userId المستخدم المنفّذ.
- * @param {string|number} input.quantity كمية موجبة بالوحدة الأساسية.
- * @param {string} [input.note] ملاحظة اختيارية.
+ * @param {string} input.itemId
+ * @param {string} input.userId Acting user.
+ * @param {string|number} input.quantity Positive amount in the item's base unit.
+ * @param {string} [input.note]
  * @returns {Promise<{ item: object, transaction: object }>}
- * @throws {NotFoundError} إن لم يوجد العنصر.
+ * @throws {NotFoundError} When the item does not exist.
  */
 export async function addStock({ itemId, userId, quantity, note }) {
   const id = assertNonEmptyString(itemId, 'itemId');
@@ -61,13 +66,13 @@ export async function addStock({ itemId, userId, quantity, note }) {
   return withTransaction(async (client) => {
     const item = await incrementStock(client, id, qty);
     if (!item) {
-      throw new NotFoundError('العنصر غير موجود');
+      throw new NotFoundError('Item not found');
     }
     const transaction = await insertTransaction(client, {
       itemId: id,
       userId: uid,
       type: TX_TYPE.IN,
-      quantityChange: qty, // موجب = إدخال
+      quantityChange: qty, // positive = inflow
       note,
     });
     return { item, transaction };
@@ -75,37 +80,41 @@ export async function addStock({ itemId, userId, quantity, note }) {
 }
 
 /**
- * يسحب كمية من المخزون (استهلاك أو هدر) ويسجّلها كحركة out/waste.
- * ⚠️ [INV-1] الإنقاص يتم عبر UPDATE شرطي ذرّي واحد (decrementStock)؛ صفر صفوف = رصيد غير كافٍ.
- *    لا نقرأ الرصيد ثم نقرّر — ذلك يعيد الـ Race Condition. الـ SELECT التالي للتشخيص فقط.
+ * Withdraws stock (consumption or waste) and records the movement.
+ *
+ * [INV-1] The decrement happens in one conditional atomic UPDATE
+ * (decrementStock); zero rows = insufficient stock. We never read the balance
+ * first to decide — that would reintroduce the race condition. The SELECT
+ * below runs only after the UPDATE failed, purely to tell "not found" apart
+ * from "insufficient".
  * @param {object} input
  * @param {string} input.itemId
  * @param {string} input.userId
- * @param {string|number} input.quantity كمية موجبة تُسحب.
- * @param {'out'|'waste'} [input.type] نوع السحب (افتراضي out). waste = خسارة (القسم 7).
+ * @param {string|number} input.quantity Positive amount to withdraw.
+ * @param {'out'|'waste'} [input.type] Withdrawal type (default out). waste is
+ *   tracked separately so managers can see losses (section 7).
  * @param {string} [input.note]
  * @returns {Promise<{ item: object, transaction: object }>}
- * @throws {ValidationError} لنوع غير مسموح.
- * @throws {NotFoundError} إن لم يوجد العنصر.
- * @throws {InsufficientStockError} إن كان الرصيد غير كافٍ.
+ * @throws {ValidationError} For a disallowed type.
+ * @throws {NotFoundError} When the item does not exist.
+ * @throws {InsufficientStockError} When stock does not cover the amount.
  */
 export async function consumeStock({ itemId, userId, quantity, type = TX_TYPE.OUT, note }) {
   const id = assertNonEmptyString(itemId, 'itemId');
   const uid = assertNonEmptyString(userId, 'userId');
   const qty = assertPositiveQuantity(quantity, 'quantity'); // [INV-4]
   if (!CONSUMING_TYPES.has(type)) {
-    throw new ValidationError(`نوع السحب غير صالح: ${type}`);
+    throw new ValidationError(`Invalid withdrawal type: ${type}`);
   }
 
   return withTransaction(async (client) => {
-    // [INV-1] الإنقاص الذرّي الشرطي — القرار كله داخل هذه الجملة.
+    // [INV-1] The whole decision lives inside this conditional atomic UPDATE.
     const item = await decrementStock(client, id, qty);
     if (!item) {
-      // فشل الإنقاص: إمّا عنصر غير موجود أو رصيد غير كافٍ. SELECT للتمييز فقط
-      // (بعد فشل UPDATE الذرّي — لا يؤثّر على الذرّية ولا يعيد الـ Race Condition).
+      // Diagnose only: distinguish missing item from insufficient stock.
       const exists = await findItemByIdTx(client, id);
       if (!exists) {
-        throw new NotFoundError('العنصر غير موجود');
+        throw new NotFoundError('Item not found');
       }
       throw new InsufficientStockError();
     }
@@ -113,7 +122,7 @@ export async function consumeStock({ itemId, userId, quantity, type = TX_TYPE.OU
       itemId: id,
       userId: uid,
       type,
-      quantityChange: `-${qty}`, // سالب = سحب
+      quantityChange: `-${qty}`, // negative = outflow
       note,
     });
     return { item, transaction };
@@ -121,16 +130,17 @@ export async function consumeStock({ itemId, userId, quantity, type = TX_TYPE.OU
 }
 
 /**
- * تسوية جرد: يطبّق فرقاً موقّعاً على الرصيد لمصالحة النظام مع الواقع (القسم 7).
- * الفرق قد يكون موجباً أو سالباً؛ لا يُسمح بنزول الرصيد تحت الصفر [INV-1].
+ * Inventory adjustment: applies a signed delta to reconcile the system with
+ * reality (section 7). The delta may be positive or negative; the balance can
+ * never drop below zero [INV-1].
  * @param {object} input
  * @param {string} input.itemId
  * @param {string} input.userId
- * @param {string|number} input.delta الفرق الموقّع (غير صفري).
- * @param {string} [input.note] سبب التسوية (يُنصح به للتوثيق).
+ * @param {string|number} input.delta Signed, non-zero difference.
+ * @param {string} [input.note] Reason for the adjustment (recommended).
  * @returns {Promise<{ item: object, transaction: object }>}
- * @throws {NotFoundError} إن لم يوجد العنصر.
- * @throws {InsufficientStockError} إن كان الفرق السالب يتجاوز الرصيد المتاح.
+ * @throws {NotFoundError} When the item does not exist.
+ * @throws {InsufficientStockError} When a negative delta exceeds available stock.
  */
 export async function adjustStock({ itemId, userId, delta, note }) {
   const id = assertNonEmptyString(itemId, 'itemId');
@@ -138,14 +148,14 @@ export async function adjustStock({ itemId, userId, delta, note }) {
   const signedDelta = assertSignedNonZeroQuantity(delta, 'delta'); // [INV-4]
 
   return withTransaction(async (client) => {
-    // [INV-1] تطبيق ذرّي شرطي: current_stock + delta >= 0.
+    // [INV-1] Atomic conditional apply: current_stock + delta >= 0.
     const item = await applyStockDelta(client, id, signedDelta);
     if (!item) {
       const exists = await findItemByIdTx(client, id);
       if (!exists) {
-        throw new NotFoundError('العنصر غير موجود');
+        throw new NotFoundError('Item not found');
       }
-      throw new InsufficientStockError('التسوية تُنزل الرصيد تحت الصفر');
+      throw new InsufficientStockError('Adjustment would drop stock below zero');
     }
     const transaction = await insertTransaction(client, {
       itemId: id,
@@ -159,17 +169,19 @@ export async function adjustStock({ itemId, userId, delta, note }) {
 }
 
 /**
- * يتراجع عن حركة سابقة بإنشاء حركة عكسية تشير إليها [INV-3] — دون حذف/تعديل الأصلية.
- * الحركة العكسية تطبّق عكس أثر الأصلية على الرصيد ذرّياً مع منع الرصيد السالب [INV-1].
- * لماذا: التصحيح موثّق ومترابط؛ لا يمحو التاريخ بل يضيف إليه.
+ * Undoes a movement by inserting a reversal that references it [INV-3] —
+ * the original row is never deleted or modified. The reversal applies the
+ * opposite effect atomically, still respecting the non-negative rule [INV-1].
  * @param {object} input
- * @param {string} input.transactionId معرّف الحركة الأصلية.
- * @param {string} input.userId المستخدم المنفّذ للتراجع.
- * @param {string} [input.note] سبب التراجع.
- * @returns {Promise<{ item: object, transaction: object }>} العنصر بعد التصحيح والحركة العكسية.
- * @throws {NotFoundError} إن لم توجد الحركة الأصلية.
- * @throws {ValidationError} إن كانت الحركة مُراجَعة سابقاً أو كانت هي نفسها حركة عكسية.
- * @throws {InsufficientStockError} إن كان عكس الأثر يُنزل الرصيد تحت الصفر (استُهلك بالفعل).
+ * @param {string} input.transactionId Original movement id.
+ * @param {string} input.userId User performing the undo.
+ * @param {string} [input.note] Reason for the undo.
+ * @returns {Promise<{ item: object, transaction: object }>} Item after the
+ *   correction and the reversal row.
+ * @throws {NotFoundError} When the original movement does not exist.
+ * @throws {ValidationError} When it was already reversed or is itself a reversal.
+ * @throws {InsufficientStockError} When reversing would drop stock below zero
+ *   (the received goods were already consumed).
  */
 export async function undoTransaction({ transactionId, userId, note }) {
   const txId = assertNonEmptyString(transactionId, 'transactionId');
@@ -178,58 +190,54 @@ export async function undoTransaction({ transactionId, userId, note }) {
   return withTransaction(async (client) => {
     const original = await findTransactionById(client, txId);
     if (!original) {
-      throw new NotFoundError('الحركة غير موجودة');
+      throw new NotFoundError('Transaction not found');
     }
-    // لا نتراجع عن حركة عكسية (يمنع سلاسل تصحيح ملتبسة) [INV-3].
+    // Reversals cannot be undone themselves; it would create confusing chains [INV-3].
     if (original.reverses_transaction_id) {
-      throw new ValidationError('لا يمكن التراجع عن حركة تصحيح');
+      throw new ValidationError('A reversal cannot be undone');
     }
-    // منع التراجع المزدوج عن نفس الحركة.
     if (await hasReversal(client, txId)) {
-      throw new ValidationError('تمّ التراجع عن هذه الحركة من قبل');
+      throw new ValidationError('This transaction was already undone');
     }
 
-    // أثر التراجع = عكس quantity_change الأصلي (نصّ numeric، بلا حساب float [INV-4]).
+    // The undo effect is the negation of the original quantity_change,
+    // computed on the decimal string — no float math [INV-4].
     const reversalDelta = negateNumericString(original.quantity_change);
 
-    // [INV-1] تطبيق ذرّي مع منع النزول تحت الصفر (مثلاً التراجع عن in استُهلك بعضه).
+    // [INV-1] Atomic apply with the non-negative guard (e.g. undoing an "in"
+    // whose goods were partially consumed already).
     const item = await applyStockDelta(client, original.item_id, reversalDelta);
     if (!item) {
-      throw new InsufficientStockError('لا يمكن التراجع: الرصيد الحالي لا يكفي لعكس الحركة');
+      throw new InsufficientStockError('Cannot undo: current stock does not cover the reversal');
     }
 
-    // [INV-3] حركة عكسية جديدة تشير للأصلية — الأصلية تبقى كما هي.
+    // [INV-3] New reversal row referencing the original; the original stays untouched.
     const transaction = await insertTransaction(client, {
       itemId: original.item_id,
       userId: uid,
       type: TX_TYPE.ADJUSTMENT,
       quantityChange: reversalDelta,
-      note: note ?? `تراجع عن الحركة ${txId}`,
+      note: note ?? `Undo of transaction ${txId}`,
       reversesTransactionId: txId,
     });
     return { item, transaction };
   });
 }
 
-/** الحدّ الأقصى المسموح لصفوف سجل الحركات في طلب واحد. */
-const HISTORY_MAX_LIMIT = 200;
-/** الحدّ الافتراضي لصفوف السجل. */
-const HISTORY_DEFAULT_LIMIT = 50;
-
 /**
- * يقرأ سجل الحركات (الأحدث أولاً) بفلاتر اختيارية — "ما الذي دخل/خرج/فسد/صُحّح".
- * قراءة فقط من السجل الثابت [INV-3].
+ * Reads the movement history (newest first) with optional filters — what came
+ * in, went out, spoiled, or was corrected. Read-only ledger view [INV-3].
  * @param {object} [filters]
  * @param {string} [filters.itemId]
- * @param {string} [filters.locationId] قسم/براد.
+ * @param {string} [filters.locationId] Location (fridge).
  * @param {string} [filters.type] in|out|waste|adjustment.
  * @param {string|number} [filters.limit]
  * @returns {Promise<object[]>}
- * @throws {ValidationError} لنوع غير معروف.
+ * @throws {ValidationError} For an unknown type.
  */
 export async function getTransactions({ itemId, locationId, type, limit } = {}) {
   if (type && !Object.values(TX_TYPE).includes(type)) {
-    throw new ValidationError(`نوع حركة غير معروف: ${type}`);
+    throw new ValidationError(`Unknown transaction type: ${type}`);
   }
   const parsed = Number.parseInt(limit ?? HISTORY_DEFAULT_LIMIT, 10);
   const safeLimit = Number.isInteger(parsed)
@@ -244,9 +252,9 @@ export async function getTransactions({ itemId, locationId, type, limit } = {}) 
 }
 
 /**
- * يعكس إشارة رقم عشري ممثَّل كنصّ دون تحويله إلى float [INV-4].
- * @param {string} value نصّ رقم numeric من قاعدة البيانات (مثل "5", "-2.5").
- * @returns {string} النص بإشارة معكوسة ("-5", "2.5").
+ * Negates a decimal string without converting it to a float [INV-4].
+ * @param {string} value Numeric string from the database (e.g. "5", "-2.5").
+ * @returns {string} The string with its sign flipped ("-5", "2.5").
  */
 function negateNumericString(value) {
   const str = String(value).trim();

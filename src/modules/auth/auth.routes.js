@@ -1,6 +1,6 @@
 /**
  * auth.routes.js
- * الطبقة: route — يربط مسارات المصادقة بالـ controller وسلسلة الـ middleware. لا منطق.
+ * Layer: route — maps auth URLs to the controller and middleware chain.
  */
 
 import { Router } from 'express';
@@ -9,7 +9,7 @@ import { getMe } from './auth.controller.js';
 
 const router = Router();
 
-// من أنا؟ — يتطلب توكناً صالحاً لمستخدم موجود في users.
+// Who am I? Requires a valid token for an existing users row.
 router.get('/me', requireAuth, getMe);
 
 export default router;

@@ -1,69 +1,72 @@
 /**
  * validate.js
- * الطبقة: shared — تحقّق من مدخلات الطلبات وتطبيعها.
- * المسؤولية: رفض المدخلات غير الصالحة مبكراً برمي ValidationError (يحوّلها errorHandler لـ 400).
+ * Layer: shared — request input validation and normalization.
+ * Rejects bad input early with ValidationError (mapped to HTTP 400).
  *
- * ⚠️ [INV-4] الكميات numeric بلا تقريب: نتعامل مع الكمية كـ نصّ عشري ونمرّره كما هو إلى
- *    PostgreSQL. لا نحوّلها إلى Number في JS (يفقد الدقة: 0.1 + 0.2). الحساب يتم في numeric.
+ * [INV-4] Quantities are numeric with no rounding: values are validated as
+ * decimal strings and passed through to PostgreSQL as-is. They are never
+ * converted to JS Number for arithmetic (0.1 + 0.2 precision loss) — all
+ * quantity math happens in the database's numeric type.
  */
 
 import { ValidationError } from './errors.js';
 
-/** نمط رقم عشري موجب: أرقام صحيحة أو كسرية بلا إشارة. */
+/** Positive decimal: integer or fraction, no sign. */
 const POSITIVE_DECIMAL = /^\d+(\.\d+)?$/;
-/** نمط رقم عشري موقّع: يسمح بإشارة سالبة (للتسويات). */
+/** Signed decimal: allows a leading minus (used for adjustments). */
 const SIGNED_DECIMAL = /^-?\d+(\.\d+)?$/;
 
 /**
- * يتحقّق أن القيمة نصّ/رقم يمثّل كمية موجبة صالحة، ويعيدها كنصّ عشري.
- * السبب: تمرير النص إلى pg يحفظ دقّة numeric [INV-4]؛ والرفض المبكر يمنع كميات لا معنى لها.
- * @param {unknown} value القيمة القادمة من الطلب.
- * @param {string} field اسم الحقل (لرسالة الخطأ).
- * @returns {string} الكمية كنصّ عشري موجب.
- * @throws {ValidationError} إذا لم تكن رقماً موجباً صالحاً.
+ * Asserts the value is a valid positive quantity and returns it as a decimal
+ * string, preserving numeric precision end-to-end [INV-4].
+ * @param {unknown} value Raw request value.
+ * @param {string} field Field name for the error message.
+ * @returns {string} Positive decimal string.
+ * @throws {ValidationError} When not a valid positive number.
  */
 export function assertPositiveQuantity(value, field) {
   const str = typeof value === 'number' ? String(value) : value;
   if (typeof str !== 'string' || !POSITIVE_DECIMAL.test(str.trim())) {
-    throw new ValidationError(`${field} يجب أن يكون رقماً موجباً صالحاً`);
+    throw new ValidationError(`${field} must be a valid positive number`);
   }
   const normalized = str.trim();
   if (Number(normalized) <= 0) {
-    throw new ValidationError(`${field} يجب أن يكون أكبر من صفر`);
+    throw new ValidationError(`${field} must be greater than zero`);
   }
   return normalized;
 }
 
 /**
- * يتحقّق أن القيمة كمية موقّعة غير صفرية (للتسويات)، ويعيدها كنصّ عشري.
- * غير الصفرية لأن الحركة الصفرية بلا معنى وتخالف قيد قاعدة البيانات.
- * @param {unknown} value القيمة القادمة من الطلب.
- * @param {string} field اسم الحقل.
- * @returns {string} الفرق كنصّ عشري موقّع (قد يبدأ بـ -).
- * @throws {ValidationError} إذا لم تكن رقماً موقّعاً صالحاً أو كانت صفراً.
+ * Asserts the value is a signed, non-zero quantity (for adjustments) and
+ * returns it as a decimal string. Zero is rejected because a zero movement is
+ * meaningless and violates the database check constraint.
+ * @param {unknown} value Raw request value.
+ * @param {string} field Field name for the error message.
+ * @returns {string} Signed decimal string (may start with "-").
+ * @throws {ValidationError} When not a valid number or when zero.
  */
 export function assertSignedNonZeroQuantity(value, field) {
   const str = typeof value === 'number' ? String(value) : value;
   if (typeof str !== 'string' || !SIGNED_DECIMAL.test(str.trim())) {
-    throw new ValidationError(`${field} يجب أن يكون رقماً صالحاً`);
+    throw new ValidationError(`${field} must be a valid number`);
   }
   const normalized = str.trim();
   if (Number(normalized) === 0) {
-    throw new ValidationError(`${field} لا يمكن أن يكون صفراً`);
+    throw new ValidationError(`${field} must not be zero`);
   }
   return normalized;
 }
 
 /**
- * يتحقّق أن القيمة نصّ غير فارغ ويعيدها مقصوصة.
- * @param {unknown} value القيمة.
- * @param {string} field اسم الحقل.
- * @returns {string} النص المقصوص.
- * @throws {ValidationError} إذا كان فارغاً أو ليس نصاً.
+ * Asserts the value is a non-empty string and returns it trimmed.
+ * @param {unknown} value Raw request value.
+ * @param {string} field Field name for the error message.
+ * @returns {string}
+ * @throws {ValidationError} When empty or not a string.
  */
 export function assertNonEmptyString(value, field) {
   if (typeof value !== 'string' || value.trim() === '') {
-    throw new ValidationError(`${field} مطلوب`);
+    throw new ValidationError(`${field} is required`);
   }
   return value.trim();
 }

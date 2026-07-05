@@ -1,16 +1,32 @@
 /**
- * api.js — غلاف fetch للتواصل مع الـ backend.
- * يرفق توكن Supabase (Bearer) تلقائياً من الجلسة الحالية، ويحوّل أخطاء الـ backend
- * إلى استثناءات تحمل الرمز والرسالة (بصيغة { error: { code, message } } الموحّدة).
+ * api.js — fetch wrapper for the backend API.
+ * Attaches the Supabase bearer token from the current session and converts
+ * backend errors (uniform { error: { code, message } } shape) into ApiError
+ * instances carrying a German user-facing message resolved from the code.
  */
 
 import { supabase } from './supabase.js';
 
-// في الإنتاج تُخدَم الواجهة من Express نفسه، لذلك /api تعمل على نفس الدومين (Railway).
-// في التطوير يمرر Vite هذه الطلبات إلى backend عبر proxy في vite.config.js.
+// In production Express serves the built frontend, so /api shares the domain
+// (Railway). In development the Vite proxy forwards /api to the backend.
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 
-/** خطأ API يحمل رمز الـ backend ورمز HTTP. */
+/**
+ * German messages by backend error code. The backend's `message` field is
+ * developer-facing English; users only ever see these.
+ */
+const ERROR_MESSAGES = {
+  NOT_FOUND: 'Nicht gefunden.',
+  VALIDATION_ERROR: 'Ungültige Eingabe. Bitte prüfen und erneut versuchen.',
+  INSUFFICIENT_STOCK: 'Der Bestand reicht dafür nicht aus.',
+  UNAUTHORIZED: 'Anmeldung erforderlich oder abgelaufen.',
+  FORBIDDEN: 'Keine Berechtigung für diese Aktion.',
+  INTERNAL_ERROR: 'Unerwarteter Fehler. Bitte erneut versuchen.',
+};
+
+const FALLBACK_MESSAGE = 'Anfrage fehlgeschlagen. Bitte erneut versuchen.';
+
+/** API error carrying the backend code and the HTTP status. */
 export class ApiError extends Error {
   constructor(message, { code, status } = {}) {
     super(message);
@@ -20,7 +36,7 @@ export class ApiError extends Error {
   }
 }
 
-/** يعيد توكن الوصول الحالي من جلسة Supabase، أو null إن لم يوجد. */
+/** Returns the current access token from the Supabase session, if any. */
 async function getAccessToken() {
   if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
@@ -28,11 +44,11 @@ async function getAccessToken() {
 }
 
 /**
- * ينفّذ طلباً إلى الـ backend مع إرفاق التوكن ومعالجة الأخطاء.
- * @param {string} path مسار نسبي (مثل '/items').
+ * Performs a backend request with token attachment and error mapping.
+ * @param {string} path Relative path (e.g. '/items').
  * @param {object} [options] { method, body }.
- * @returns {Promise<any>} جسم الرد (JSON) عند النجاح.
- * @throws {ApiError} عند رد غير ناجح.
+ * @returns {Promise<any>} Parsed JSON body on success.
+ * @throws {ApiError} On a non-2xx response.
  */
 async function request(path, { method = 'GET', body } = {}) {
   const token = await getAccessToken();
@@ -50,7 +66,7 @@ async function request(path, { method = 'GET', body } = {}) {
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const err = data?.error ?? {};
-    throw new ApiError(err.message ?? 'Anfrage fehlgeschlagen', {
+    throw new ApiError(ERROR_MESSAGES[err.code] ?? FALLBACK_MESSAGE, {
       code: err.code,
       status: res.status,
     });
@@ -58,7 +74,7 @@ async function request(path, { method = 'GET', body } = {}) {
   return data;
 }
 
-/** واجهة مختصرة لنقاط النهاية المستخدمة في الواجهة. */
+/** Typed surface over the endpoints the frontend uses. */
 export const api = {
   me: () => request('/auth/me'),
 

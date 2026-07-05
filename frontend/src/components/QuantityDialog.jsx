@@ -1,7 +1,9 @@
 /**
- * QuantityDialog.jsx — حوار كمية لثلاث عمليات: receive (إدخال) / consume (سحب/هدر) /
- * adjust (تسوية جرد Korrektur — للمدير، بإشارة +/−).
- * يقبل الفاصلة الألمانية (2,5) ويطبّعها. يُغلق بـ Esc وبالنقر خارجه، والتركيز على الحقل.
+ * QuantityDialog.jsx — quantity dialog for three operations: receive (goods
+ * in), consume (withdrawal/waste), and adjust (inventory correction, admin,
+ * with a +/- direction toggle).
+ * Accepts the German decimal comma ("2,5") and normalizes it. Closes on
+ * Escape and on backdrop click; the quantity field receives focus.
  */
 
 import { useEffect, useState } from 'react';
@@ -15,13 +17,13 @@ const TITLES = {
 
 export default function QuantityDialog({ item, mode, onSubmit, onClose }) {
   const [quantity, setQuantity] = useState('');
-  const [type, setType] = useState('out'); // للسحب: out | waste
-  const [sign, setSign] = useState('-');   // للتسوية: + | -
+  const [type, setType] = useState('out'); // consume: out | waste
+  const [sign, setSign] = useState('-');   // adjust: + | -
   const [note, setNote] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // إغلاق بـ Escape (أرضية وصولية أساسية للحوار).
+  // Escape closes the dialog (baseline dialog accessibility).
   useEffect(() => {
     function onKey(e) {
       if (e.key === 'Escape') onClose();
@@ -32,7 +34,7 @@ export default function QuantityDialog({ item, mode, onSubmit, onClose }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    const q = normalizeDecimalInput(quantity); // "2,5" → "2.5"
+    const q = normalizeDecimalInput(quantity);
     if (!POSITIVE_DECIMAL.test(q) || Number(q) <= 0) {
       setError('Bitte eine gültige Menge größer als 0 eingeben (z. B. 2,5).');
       return;
@@ -82,7 +84,7 @@ export default function QuantityDialog({ item, mode, onSubmit, onClose }) {
                   sign === '-' ? 'border-crust bg-crust-soft text-crust-dark' : 'border-line text-ink-2'
                 }`}
               >
-                − Weniger als im System
+                Weniger als im System
               </button>
               <button
                 type="button"
@@ -91,7 +93,7 @@ export default function QuantityDialog({ item, mode, onSubmit, onClose }) {
                   sign === '+' ? 'border-crust bg-crust-soft text-crust-dark' : 'border-line text-ink-2'
                 }`}
               >
-                + Mehr als im System
+                Mehr als im System
               </button>
             </div>
           )}

@@ -1,6 +1,7 @@
 /**
  * categories.routes.js
- * الطبقة: route — ربط فقط. عرض للموثّقين، إنشاء للمدير (RBAC كالعناصر).
+ * Layer: route — wiring only. Reading for authenticated users, creation for
+ * admins (same RBAC split as items).
  */
 
 import { Router } from 'express';

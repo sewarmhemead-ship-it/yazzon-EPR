@@ -1,13 +1,13 @@
 /**
  * categories.repository.js
- * الطبقة: repository — استعلامات SQL للتصنيفات فقط. لا منطق أعمال.
- * القاعدة (القسم 2): كل SQL يدوي و parameterized عبر node-postgres.
+ * Layer: repository — SQL for categories only. No business logic.
+ * All SQL is hand-written and parameterized via node-postgres (section 2).
  */
 
 import { query } from '../../config/db.js';
 
 /**
- * يجلب كل التصنيفات مرتّبة بالاسم.
+ * Lists all categories ordered by name.
  * @returns {Promise<object[]>}
  */
 export async function listCategories() {
@@ -16,9 +16,9 @@ export async function listCategories() {
 }
 
 /**
- * يُنشئ تصنيفاً جديداً.
- * @param {string} name اسم التصنيف.
- * @returns {Promise<object>} صفّ التصنيف المُنشأ.
+ * Creates a category.
+ * @param {string} name Category name.
+ * @returns {Promise<object>} The created row.
  */
 export async function createCategory(name) {
   const { rows } = await query(

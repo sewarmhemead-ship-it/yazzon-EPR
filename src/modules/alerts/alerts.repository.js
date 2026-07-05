@@ -1,17 +1,17 @@
 /**
  * alerts.repository.js
- * الطبقة: repository — استعلامات SQL للتنبيهات فقط. لا منطق أعمال.
- * القاعدة (القسم 2): كل SQL يدوي و parameterized عبر node-postgres.
- * التنبيه استعلام لحظي (القسم 10) — لا jobs دورية ولا جدول PurchaseRequests.
+ * Layer: repository — SQL for purchase alerts only. No business logic.
+ * The alert is a live query (section 10) — no scheduled jobs, no extra tables.
+ * All SQL is hand-written and parameterized via node-postgres (section 2).
  */
 
 import { query } from '../../config/db.js';
 
 /**
- * يجلب العناصر التي بلغت حدّها الأدنى أو نزلت تحته (تحتاج شراءً).
- * الترتيب (القسم 10): غير المطلوبة أولاً (is_ordered ASC)، ثم الأشدّ نقصاً أولاً
- * (min_stock_level - current_stock) DESC — ليرى المدير الأولوية فوراً.
- * @returns {Promise<object[]>} صفوف العناصر المنخفضة.
+ * Lists items at or below their minimum stock level (need purchasing).
+ * Order (section 10): not-yet-ordered first (is_ordered ASC), then largest
+ * shortfall first — so the manager sees priorities immediately.
+ * @returns {Promise<object[]>}
  */
 export async function getLowStockItems() {
   const { rows } = await query(
@@ -23,11 +23,12 @@ export async function getLowStockItems() {
 }
 
 /**
- * يضبط حالة "تم طلبه" لعنصر ويحدّث زمن آخر طلب.
- * السبب (القسم 7): يفصل "مطلوب" عن "مطلوب وتم طلبه" فلا يتكرّر التنبيه بعد إرسال الطلب.
- * @param {string} itemId معرّف العنصر.
- * @param {boolean} isOrdered القيمة الجديدة.
- * @returns {Promise<object | null>} صفّ العنصر بعد التحديث، أو null إن لم يوجد.
+ * Sets an item's "ordered" flag and stamps last_ordered_at when marking.
+ * Separates "needed" from "needed but already ordered" so the alert does not
+ * keep nagging after the purchase order went out (section 7).
+ * @param {string} itemId Item id.
+ * @param {boolean} isOrdered New flag value.
+ * @returns {Promise<object | null>} Updated row, or null when not found.
  */
 export async function setItemOrdered(itemId, isOrdered) {
   const { rows } = await query(

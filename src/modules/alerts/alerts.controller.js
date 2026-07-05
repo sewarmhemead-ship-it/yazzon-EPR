@@ -1,12 +1,12 @@
 /**
  * alerts.controller.js
- * الطبقة: controller — HTTP فقط: يقرأ الطلب، يستدعي الـ service، يعيد الرد. لا منطق أعمال.
- * الأخطاء تُمرَّر عبر next(err) إلى errorHandler المركزي.
+ * Layer: controller — HTTP only. No business logic.
+ * Errors are forwarded to the central errorHandler via next(err).
  */
 
 import { listAlerts, markOrdered } from './alerts.service.js';
 
-/** يعيد قائمة عناصر النقص (تحتاج شراءً). */
+/** Lists items that need purchasing. */
 export async function getAlerts(_req, res, next) {
   try {
     const items = await listAlerts();
@@ -16,7 +16,7 @@ export async function getAlerts(_req, res, next) {
   }
 }
 
-/** يعلّم عنصراً بأنه تم طلبه (is_ordered = true). */
+/** Marks an item as ordered (is_ordered = true). */
 export async function markItemOrdered(req, res, next) {
   try {
     const item = await markOrdered(req.params.id, true);
@@ -26,7 +26,7 @@ export async function markItemOrdered(req, res, next) {
   }
 }
 
-/** يلغي علامة الطلب عن عنصر (is_ordered = false) — تصحيح يدوي إن لزم. */
+/** Clears the ordered mark (is_ordered = false) — manual correction. */
 export async function unmarkItemOrdered(req, res, next) {
   try {
     const item = await markOrdered(req.params.id, false);

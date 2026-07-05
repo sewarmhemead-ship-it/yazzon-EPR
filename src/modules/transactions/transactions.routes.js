@@ -1,11 +1,11 @@
 /**
  * transactions.routes.js
- * الطبقة: route — يربط مسارات الحركات بالـ controller وسلسلة الـ middleware. لا منطق.
+ * Layer: route — maps movement URLs to the controller and middleware chain.
  *
- * RBAC (القسم 2 + الاختبار الإلزامي #10):
- *   - التسجيل اليومي (in/out/waste) متاح للموثّقين (staff + admin).
- *   - التسويات (adjustment) والتراجع (undo) حسّاسة → admin فقط.
- * كل المسارات تتطلب توثيقاً؛ userId يُشتقّ من req.user لا من الجسم.
+ * RBAC (section 2 + mandatory test 10):
+ *   - Daily bookings (in/out/waste) and reading history: any authenticated user.
+ *   - Adjustments and undo are sensitive: admin only.
+ * Every route requires authentication; userId derives from req.user.
  */
 
 import { Router } from 'express';
@@ -15,12 +15,12 @@ import { receive, consume, adjust, undo, list } from './transactions.controller.
 
 const router = Router();
 
-router.use(requireAuth); // كل ما تحت هذا الموجّه يتطلب هوية موثّقة.
+router.use(requireAuth);
 
-router.get('/', list); // سجل الحركات (جاي/رايح/فاسد/تصحيح)
+router.get('/', list); // movement history (in/out/waste/adjustment)
 router.post('/receive', receive); // in
 router.post('/consume', consume); // out | waste
-router.post('/adjust', requireRole('admin'), adjust); // تسوية جرد
-router.post('/:id/undo', requireRole('admin'), undo); // تراجع
+router.post('/adjust', requireRole('admin'), adjust); // inventory adjustment
+router.post('/:id/undo', requireRole('admin'), undo); // reversal
 
 export default router;

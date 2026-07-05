@@ -1,24 +1,27 @@
 /**
  * auth.js
- * الطبقة: middleware — التحقق من هوية المستخدم عبر توكن Supabase (JWT).
- * المسؤولية: قبول الطلبات الموثّقة فقط ووضع المستخدم على req.user للطبقات التالية.
+ * Layer: middleware — authenticates requests via Supabase-issued JWTs.
+ * Verifies the token locally (HS256 secret or JWKS, see verifySupabaseJwt),
+ * loads the matching users row, and attaches it as req.user.
  *
- * قرارات المرحلة 2:
- *   - التحقق محلياً من توقيع JWT عبر SUPABASE_JWT_SECRET أو JWKS حسب إعداد Supabase.
- *   - المستخدم يجب أن يكون موجوداً مسبقاً في جدول users؛ توكن لهوية بلا صفّ → 401.
- *   - الصلاحيات تُفرَض هنا وفي requireRole — RLS مُطفأة (القسم 2).
+ * Design decisions:
+ *   - The user must already exist in the users table; a valid token without a
+ *     matching row is rejected with 401 (no just-in-time provisioning).
+ *   - Authorization is enforced here and in requireRole — RLS is disabled
+ *     (CLAUDE.md section 2), so Express is the only gatekeeper.
  */
 
 import { UnauthorizedError } from '../shared/errors.js';
 import { findUserById } from '../modules/auth/auth.repository.js';
 import { verifySupabaseJwt } from './verifySupabaseJwt.js';
 
-/** بادئة نظام المصادقة في ترويسة Authorization. */
+/** Authorization header scheme prefix. */
 const BEARER_PREFIX = 'Bearer ';
 
 /**
- * middleware يتحقّق من توكن الطلب ويحمّل المستخدم إلى req.user.
- * async ويُمرّر الأخطاء عبر next(err) لأن Express 4 لا يلتقط رمي الدوال async تلقائياً.
+ * Verifies the request token and loads the user onto req.user.
+ * Async, so errors are forwarded via next(err) — Express 4 does not catch
+ * rejections from async middleware on its own.
  * @param {import('express').Request} req
  * @param {import('express').Response} _res
  * @param {import('express').NextFunction} next
@@ -27,7 +30,7 @@ export async function requireAuth(req, _res, next) {
   try {
     const header = req.headers.authorization ?? '';
     if (!header.startsWith(BEARER_PREFIX)) {
-      throw new UnauthorizedError('توكن المصادقة مفقود');
+      throw new UnauthorizedError('Missing authentication token');
     }
     const token = header.slice(BEARER_PREFIX.length).trim();
 
@@ -35,19 +38,19 @@ export async function requireAuth(req, _res, next) {
     try {
       payload = await verifySupabaseJwt(token);
     } catch {
-      // لا نسرّب سبب الفشل (منتهٍ/توقيع خاطئ) للعميل — كله "غير صالح".
-      throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+      // Do not leak the failure reason (expired vs bad signature) to the client.
+      throw new UnauthorizedError('Invalid or expired token');
     }
 
     const userId = payload.sub;
     if (!userId) {
-      throw new UnauthorizedError('توكن بلا معرّف مستخدم');
+      throw new UnauthorizedError('Token has no subject');
     }
 
-    // 2-ب: الهوية يجب أن تقابل صفّ users موجوداً مسبقاً؛ لا إنشاء تلقائي.
+    // The identity must map to an existing users row; nothing is auto-created.
     const user = await findUserById(userId);
     if (!user) {
-      throw new UnauthorizedError('المستخدم غير معروف');
+      throw new UnauthorizedError('Unknown user');
     }
 
     req.user = user;

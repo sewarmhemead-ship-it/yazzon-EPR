@@ -1,9 +1,10 @@
 /**
  * migrate.js
- * الطبقة: أداة تشغيل (script) — يطبّق ملفات migrations/*.sql بالترتيب الترقيمي.
- * المسؤولية: تنفيذ الـ migrations مرة واحدة وتتبّع المطبّق منها في جدول schema_migrations.
- * السبب (القسم 8/بند 7): كل تغيير schema عبر ملف migration، لا من لوحة Supabase.
- * كل ملف يُطبَّق داخل معاملة واحدة — يُطبَّق كاملاً أو لا يُطبَّق (لا حالة نصفية).
+ * Layer: script — applies migrations/*.sql in numeric order, exactly once,
+ * tracking applied files in the schema_migrations table.
+ * (Section 8, rule 7: every schema change goes through a migration file,
+ * never the Supabase dashboard.)
+ * Each file runs inside one transaction — applied fully or not at all.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -16,37 +17,40 @@ const MIGRATIONS_DIR = fileURLToPath(new URL('../migrations', import.meta.url));
 const { Client } = pg;
 
 /**
- * يقرأ DATABASE_URL مباشرة من بيئة العملية قبل أي محاولة اتصال.
- * السبب: Railway يشغّل هذا السكربت في preDeploy؛ نريد خطأً صريحاً إن لم تصل
- * متغيرات Railway بدلاً من محاولة اتصال مضللة على localhost.
+ * Reads DATABASE_URL straight from the process environment before any
+ * connection attempt. Railway runs this script in preDeploy; we want an
+ * explicit failure when its variables are missing rather than a misleading
+ * connection attempt against localhost.
  * @returns {string}
  */
 function readDatabaseUrl() {
   const databaseUrl = process.env.DATABASE_URL?.trim();
   if (!databaseUrl) {
     console.error(
-      '[migrate] DATABASE_URL غير موجود أو فارغ. أضفه في Railway → Service → Variables قبل إعادة النشر.',
+      '[migrate] DATABASE_URL is missing or empty. Add it under Railway -> Service -> Variables before redeploying.',
     );
-    console.error('[migrate] لن يحاول السكربت الاتصال بقاعدة بيانات افتراضية أو localhost.');
+    console.error('[migrate] Refusing to fall back to a default or localhost database.');
     process.exit(1);
   }
   return databaseUrl;
 }
 
 /**
- * يطبع وجهة الاتصال بدون كشف كلمة المرور.
+ * Logs the connection target without exposing the password.
  * @param {string} databaseUrl
  */
 function logDatabaseTarget(databaseUrl) {
   try {
     const parsed = new URL(databaseUrl);
-    console.log(`[migrate] DATABASE_URL موجود. الاتصال بـ ${parsed.hostname}:${parsed.port || '5432'}/${parsed.pathname.replace(/^\//, '')}`);
+    console.log(
+      `[migrate] DATABASE_URL found. Connecting to ${parsed.hostname}:${parsed.port || '5432'}/${parsed.pathname.replace(/^\//, '')}`,
+    );
   } catch {
-    console.log('[migrate] DATABASE_URL موجود، لكن تعذر تحليل الوجهة للطباعة.');
+    console.log('[migrate] DATABASE_URL found, but the target could not be parsed for logging.');
   }
 }
 
-/** يضمن وجود جدول تتبّع الـ migrations المطبّقة. */
+/** Ensures the migration tracking table exists. */
 async function ensureMigrationsTable(client) {
   await client.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -56,7 +60,7 @@ async function ensureMigrationsTable(client) {
   `);
 }
 
-/** @returns {Promise<Set<string>>} أسماء الملفات المطبّقة سابقاً. */
+/** @returns {Promise<Set<string>>} Filenames applied previously. */
 async function loadApplied(client) {
   const { rows } = await client.query('SELECT filename FROM schema_migrations');
   return new Set(rows.map((r) => r.filename));
@@ -77,12 +81,12 @@ async function main() {
 
     const files = (await readdir(MIGRATIONS_DIR))
       .filter((f) => f.endsWith('.sql'))
-      .sort(); // الترتيب الترقيمي (001, 002, ...) يحدّد ترتيب التطبيق.
+      .sort(); // Numeric prefixes (001, 002, ...) define the apply order.
 
     let count = 0;
     for (const file of files) {
       if (applied.has(file)) {
-        console.log(`↷ متجاوَز (مطبَّق): ${file}`);
+        console.log(`[migrate] skipped (already applied): ${file}`);
         continue;
       }
       const sql = await readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
@@ -91,20 +95,20 @@ async function main() {
         await client.query(sql);
         await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
         await client.query('COMMIT');
-        console.log(`✓ طُبِّق: ${file}`);
+        console.log(`[migrate] applied: ${file}`);
         count += 1;
       } catch (err) {
         await client.query('ROLLBACK');
-        throw new Error(`فشل تطبيق ${file}: ${err.message}`, { cause: err });
+        throw new Error(`Failed to apply ${file}: ${err.message}`, { cause: err });
       }
     }
-    console.log(count === 0 ? 'لا migrations جديدة.' : `اكتمل: ${count} migration.`);
+    console.log(count === 0 ? '[migrate] no new migrations.' : `[migrate] done: ${count} migration(s).`);
   } finally {
     await client.end();
   }
 }
 
 main().catch((err) => {
-  console.error('[migrate] فشل:', err);
+  console.error('[migrate] failed:', err);
   process.exit(1);
 });

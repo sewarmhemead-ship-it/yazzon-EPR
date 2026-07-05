@@ -1,7 +1,8 @@
 /**
  * auth.test.js
- * اختبارات المرحلة 2: المصادقة (JWT) و RBAC — تغطّي الاختبار الإلزامي #10 (القسم 9).
- * نموّه auth.repository حتى لا نحتاج قاعدة بيانات حيّة؛ نتحقّق من منطق الـ middleware فقط.
+ * Phase 2 tests: authentication (JWT) and RBAC — covers mandatory test 10
+ * (CLAUDE.md section 9). The auth repository is mocked so no live database is
+ * needed; only the middleware logic is under test.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -10,7 +11,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import { generateKeyPairSync } from 'node:crypto';
 
-// دالة موّهة مرفوعة (hoisted) ليستعملها vi.mock بأمان قبل تعريف المتغيرات العادية.
+// Hoisted mock so vi.mock can reference it before regular declarations run.
 const { findUserByIdMock } = vi.hoisted(() => ({ findUserByIdMock: vi.fn() }));
 vi.mock('../src/modules/auth/auth.repository.js', () => ({
   findUserById: findUserByIdMock,
@@ -36,12 +37,12 @@ const { errorHandler } = await import('../src/middleware/errorHandler.js');
 
 const SECRET = process.env.SUPABASE_JWT_SECRET;
 
-/** يوقّع توكن اختبار صالحاً لهوية معيّنة. */
+/** Signs a valid HS256 test token for the given subject. */
 function tokenFor(sub) {
   return jwt.sign({ sub }, SECRET, { algorithm: 'HS256', expiresIn: '1h' });
 }
 
-/** يوقّع توكن اختبار ES256 كما تفعل مشاريع Supabase الحديثة عبر JWKS. */
+/** Signs an ES256 token the way current Supabase projects do (via JWKS). */
 function es256TokenFor(sub) {
   return jwt.sign({ sub }, es256PrivateKey, {
     algorithm: 'ES256',
@@ -50,7 +51,7 @@ function es256TokenFor(sub) {
   });
 }
 
-/** تطبيق صغير لاختبار RBAC على مسار admin-only. */
+/** Minimal app for exercising RBAC on an admin-only route. */
 function buildAdminApp() {
   const a = express();
   a.get('/admin-only', requireAuth, requireRole('admin'), (_req, res) =>
@@ -60,33 +61,33 @@ function buildAdminApp() {
   return a;
 }
 
-const ADMIN = { id: 'a1', name: 'مدير', email: 'admin@x.com', role: 'admin' };
-const STAFF = { id: 's1', name: 'عامل', email: 'staff@x.com', role: 'staff' };
+const ADMIN = { id: 'a1', name: 'Admin', email: 'admin@x.com', role: 'admin' };
+const STAFF = { id: 's1', name: 'Staff', email: 'staff@x.com', role: 'staff' };
 
 beforeEach(() => {
   findUserByIdMock.mockReset();
 });
 
-describe('requireAuth (المصادقة)', () => {
-  it('يرفض بلا ترويسة Authorization → 401', async () => {
+describe('requireAuth (authentication)', () => {
+  it('rejects a request without an Authorization header with 401', async () => {
     const res = await request(app).get('/api/auth/me');
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
   });
 
-  it('يرفض ترويسة بلا بادئة Bearer → 401', async () => {
+  it('rejects a header without the Bearer prefix with 401', async () => {
     const res = await request(app).get('/api/auth/me').set('Authorization', 'Token abc');
     expect(res.status).toBe(401);
   });
 
-  it('يرفض توكناً بتوقيع خاطئ → 401', async () => {
+  it('rejects a token with a bad signature with 401', async () => {
     const bad = jwt.sign({ sub: ADMIN.id }, 'wrong-secret', { algorithm: 'HS256' });
     const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${bad}`);
     expect(res.status).toBe(401);
     expect(findUserByIdMock).not.toHaveBeenCalled();
   });
 
-  it('يرفض توكناً صالحاً لهوية بلا صفّ في users → 401 (2-ب)', async () => {
+  it('rejects a valid token whose identity has no users row with 401', async () => {
     findUserByIdMock.mockResolvedValue(null);
     const res = await request(app)
       .get('/api/auth/me')
@@ -95,7 +96,7 @@ describe('requireAuth (المصادقة)', () => {
     expect(findUserByIdMock).toHaveBeenCalledWith('ghost');
   });
 
-  it('يقبل توكناً صالحاً لمستخدم موجود ويعيد req.user → 200', async () => {
+  it('accepts a valid token for an existing user and returns req.user with 200', async () => {
     findUserByIdMock.mockResolvedValue(STAFF);
     const res = await request(app)
       .get('/api/auth/me')
@@ -104,7 +105,7 @@ describe('requireAuth (المصادقة)', () => {
     expect(res.body.user).toEqual(STAFF);
   });
 
-  it('يقبل توكن ES256 عبر JWKS لمشاريع Supabase الحديثة → 200', async () => {
+  it('accepts an ES256 token via JWKS (current Supabase projects) with 200', async () => {
     findUserByIdMock.mockResolvedValue(STAFF);
     const res = await request(app)
       .get('/api/auth/me')
@@ -114,8 +115,8 @@ describe('requireAuth (المصادقة)', () => {
   });
 });
 
-describe('requireRole (RBAC — الاختبار الإلزامي #10)', () => {
-  it('يمنع staff من مسار admin → 403', async () => {
+describe('requireRole (RBAC — mandatory test 10)', () => {
+  it('blocks staff from an admin route with 403', async () => {
     findUserByIdMock.mockResolvedValue(STAFF);
     const res = await request(buildAdminApp())
       .get('/admin-only')
@@ -124,7 +125,7 @@ describe('requireRole (RBAC — الاختبار الإلزامي #10)', () => {
     expect(res.body.error.code).toBe('FORBIDDEN');
   });
 
-  it('يسمح admin بمسار admin → 200', async () => {
+  it('allows admin through an admin route with 200', async () => {
     findUserByIdMock.mockResolvedValue(ADMIN);
     const res = await request(buildAdminApp())
       .get('/admin-only')

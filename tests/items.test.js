@@ -1,13 +1,14 @@
 /**
  * items.test.js
- * اختبارات items API. تتطلّب قاعدة PostgreSQL حيّة عبر TEST_DATABASE_URL؛ تُتخطّى إن تعذّر الاتصال.
+ * items API tests. Requires a live PostgreSQL via TEST_DATABASE_URL; skipped
+ * locally when unreachable.
  *
- * التغطية:
- *   - createItem يبدأ الرصيد صفراً ولا يقبل current_stock [INV-3].
+ * Coverage:
+ *   - createItem starts stock at zero and never accepts current_stock [INV-3].
  *   - listItems / getItem.
- *   - editItem تحديث جزئي لا يمسّ الرصيد [INV-3].
- *   - رفض المدخلات غير الصالحة (اسم/وحدة/حد أدنى) [INV-4][INV-6].
- *   - getItem/editItem لعنصر غير موجود → NotFound.
+ *   - editItem partial updates never touch the balance [INV-3].
+ *   - invalid input rejected (name/unit/threshold) [INV-4][INV-6].
+ *   - getItem/editItem on a missing item throw NotFound.
  */
 
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
@@ -18,11 +19,12 @@ import {
   resetTestSchema,
   truncateCoreTables,
 } from './helpers/database.js';
+import { pool } from '../src/config/db.js';
 import { getItems, getItem, addItem, editItem } from '../src/modules/items/items.service.js';
 
 const dbReady = await canConnectToTestDatabase();
 if (!dbReady) {
-  handleMissingTestDatabase('items.test', 'تخطّي اختبارات العناصر.');
+  handleMissingTestDatabase('items.test', 'Skipping item suites.');
 }
 
 describe.skipIf(!dbReady)('items API (items.service)', () => {
@@ -34,47 +36,47 @@ describe.skipIf(!dbReady)('items API (items.service)', () => {
     await truncateCoreTables();
   });
 
-  it('addItem: ينشئ عنصراً برصيد صفر ابتدائي [INV-3]', async () => {
-    const item = await addItem({ name: 'طحين', unit: 'كجم', minStockLevel: '5' });
+  it('addItem creates an item with zero opening stock [INV-3]', async () => {
+    const item = await addItem({ name: 'Flour', unit: 'kg', minStockLevel: '5' });
 
-    expect(item.name).toBe('طحين');
-    expect(item.unit).toBe('كجم');
-    expect(item.current_stock).toBe('0'); // الرصيد لا يُضبط عند الإنشاء
+    expect(item.name).toBe('Flour');
+    expect(item.unit).toBe('kg');
+    expect(item.current_stock).toBe('0'); // stock is never set on creation
     expect(item.min_stock_level).toBe('5');
     expect(item.is_ordered).toBe(false);
   });
 
-  it('addItem: يستخدم الحدّ الأدنى الافتراضي 1 عند عدم تمريره', async () => {
-    const item = await addItem({ name: 'ملح', unit: 'كجم' });
+  it('addItem falls back to the default minimum of 1', async () => {
+    const item = await addItem({ name: 'Salt', unit: 'kg' });
     expect(item.min_stock_level).toBe('1');
   });
 
-  it('addItem: يرفض اسماً فارغاً أو وحدة فارغة [INV-6]', async () => {
-    await expect(addItem({ name: '', unit: 'كجم' })).rejects.toMatchObject({
+  it('addItem rejects an empty name or unit [INV-6]', async () => {
+    await expect(addItem({ name: '', unit: 'kg' })).rejects.toMatchObject({
       code: 'VALIDATION_ERROR',
     });
-    await expect(addItem({ name: 'سكر', unit: '  ' })).rejects.toMatchObject({
+    await expect(addItem({ name: 'Sugar', unit: '  ' })).rejects.toMatchObject({
       code: 'VALIDATION_ERROR',
     });
   });
 
-  it('addItem: يرفض حدّاً أدنى غير موجب [INV-4]', async () => {
+  it('addItem rejects a non-positive minimum [INV-4]', async () => {
     await expect(
-      addItem({ name: 'سكر', unit: 'كجم', minStockLevel: '-3' }),
+      addItem({ name: 'Sugar', unit: 'kg', minStockLevel: '-3' }),
     ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
-  it('getItems: يعيد العناصر مرتّبة بالاسم', async () => {
-    await addItem({ name: 'ياء', unit: 'كجم' });
-    await addItem({ name: 'ألف', unit: 'كجم' });
+  it('getItems returns items sorted by name', async () => {
+    await addItem({ name: 'Zucker', unit: 'kg' });
+    await addItem({ name: 'Butter', unit: 'kg' });
 
     const items = await getItems();
     expect(items).toHaveLength(2);
-    expect(items[0].name).toBe('ألف');
+    expect(items[0].name).toBe('Butter');
   });
 
-  it('getItem: يعيد العنصر، ويرمي NotFound لغير الموجود', async () => {
-    const created = await addItem({ name: 'حليب', unit: 'لتر' });
+  it('getItem returns the item and throws NotFound for a missing id', async () => {
+    const created = await addItem({ name: 'Milk', unit: 'L' });
     const found = await getItem(created.id);
     expect(found.id).toBe(created.id);
 
@@ -83,18 +85,39 @@ describe.skipIf(!dbReady)('items API (items.service)', () => {
     });
   });
 
-  it('editItem: تحديث جزئي لا يمسّ current_stock [INV-3]', async () => {
-    const created = await addItem({ name: 'زبدة', unit: 'كجم', minStockLevel: '2' });
+  it('editItem applies a partial update without touching current_stock [INV-3]', async () => {
+    const created = await addItem({ name: 'Butter', unit: 'kg', minStockLevel: '2' });
 
     const updated = await editItem(created.id, { minStockLevel: '4' });
     expect(updated.min_stock_level).toBe('4');
-    expect(updated.name).toBe('زبدة'); // لم يتغيّر
-    expect(updated.current_stock).toBe('0'); // الرصيد لم يُمَس
+    expect(updated.name).toBe('Butter'); // unchanged
+    expect(updated.current_stock).toBe('0'); // balance untouched
   });
 
-  it('editItem: يرمي NotFound لعنصر غير موجود', async () => {
+  it('editItem can clear nullable metadata without touching current_stock [INV-3]', async () => {
+    const { rows: categoryRows } = await pool.query(
+      "INSERT INTO categories (name) VALUES ('Dairy') RETURNING id",
+    );
+    const { rows: locationRows } = await pool.query(
+      "INSERT INTO locations (name, position) VALUES ('Fridge 1', 1) RETURNING id",
+    );
+    const created = await addItem({
+      name: 'Milk',
+      unit: 'L',
+      categoryId: categoryRows[0].id,
+      locationId: locationRows[0].id,
+    });
+
+    const updated = await editItem(created.id, { categoryId: null, locationId: null });
+
+    expect(updated.category_id).toBeNull();
+    expect(updated.location_id).toBeNull();
+    expect(updated.current_stock).toBe('0');
+  });
+
+  it('editItem throws NotFound for a missing item', async () => {
     await expect(
-      editItem('00000000-0000-0000-0000-000000000000', { name: 'س' }),
+      editItem('00000000-0000-0000-0000-000000000000', { name: 'x' }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });

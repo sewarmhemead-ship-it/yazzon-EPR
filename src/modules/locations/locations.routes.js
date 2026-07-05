@@ -1,6 +1,7 @@
 /**
  * locations.routes.js
- * الطبقة: route — ربط فقط. عرض للموثّقين، إنشاء للمدير.
+ * Layer: route — wiring only. Reading for authenticated users, creation for
+ * admins.
  */
 
 import { Router } from 'express';

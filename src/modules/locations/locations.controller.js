@@ -1,11 +1,11 @@
 /**
  * locations.controller.js
- * الطبقة: controller — HTTP فقط. لا منطق أعمال.
+ * Layer: controller — HTTP only. No business logic.
  */
 
 import { getLocations, addLocation } from './locations.service.js';
 
-/** قائمة الأقسام. */
+/** Lists all locations. */
 export async function listAll(_req, res, next) {
   try {
     const locations = await getLocations();
@@ -15,7 +15,7 @@ export async function listAll(_req, res, next) {
   }
 }
 
-/** إنشاء قسم. */
+/** Creates a location. */
 export async function create(req, res, next) {
   try {
     const { name, position } = req.body ?? {};

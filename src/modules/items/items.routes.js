@@ -1,10 +1,10 @@
 /**
  * items.routes.js
- * الطبقة: route — يربط مسارات العناصر بالـ controller وسلسلة الـ middleware. لا منطق.
+ * Layer: route — maps item URLs to the controller and middleware chain.
  *
- * RBAC (القسم 1: المدير يدير العناصر؛ العامل يسجّل الحركات):
- *   - عرض العناصر: متاح للموثّقين (staff + admin) — العامل يحتاج القائمة لتسجيل الحركات.
- *   - إنشاء/تعديل العناصر: admin فقط (إدارة).
+ * RBAC (section 1: admins manage items, staff record movements):
+ *   - Reading items: any authenticated user — staff need the list to book.
+ *   - Creating/updating items: admin only.
  */
 
 import { Router } from 'express';

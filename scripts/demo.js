@@ -1,8 +1,12 @@
 /**
- * demo.js — تشغيل تجريبي محلي (للتطوير فقط، ليس للإنتاج).
- * pg-mem (PostgreSQL في الذاكرة) + كل migrations بالترتيب + بيانات مقهى نمساوي واقعية:
- * 12 براداً (Kühlschränke)، أغراض موزّعة عليها، وحركات عيّنة للسجل (Verlauf).
- * ملاحظة: استيرادات src ديناميكية *بعد* ضبط البيئة (ESM يرفع الـ import الثابت).
+ * demo.js
+ * Layer: script — local demo runner (development only, never production).
+ * Boots the real server against pg-mem (in-memory PostgreSQL), applies all
+ * migrations in order, and seeds realistic Austrian bakery/cafe data:
+ * 12 fridges, items spread across them, and sample ledger movements.
+ *
+ * Note: all src imports are dynamic and happen only after the environment is
+ * set, because static ESM imports are hoisted and would load env.js first.
  */
 
 import { newDb } from 'pg-mem';
@@ -10,7 +14,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-// 1) بيئة العرض قبل تحميل أي وحدة تقرأ env.
+// 1) Demo environment, set before any module that reads env.
 process.env.NODE_ENV = 'development';
 process.env.PORT = '3000';
 process.env.DATABASE_URL = 'postgres://demo:demo@localhost/demo';
@@ -18,9 +22,11 @@ process.env.SUPABASE_JWT_SECRET = 'super-secret-jwt-key-for-demo-mode-12345678';
 process.env.CORS_ORIGIN = 'http://localhost:5173';
 process.env.DEMO_MODE = 'true';
 
-console.log('🚀 YAZOON Demo Mode (pg-mem) startet …');
+console.log('[demo] YAZOON demo mode (pg-mem) starting...');
 
-// 2) قاعدة في الذاكرة + gen_random_uuid غير نقيّة (وإلا يتكرر نفس الـ UUID).
+// 2) In-memory database. gen_random_uuid must be registered as impure,
+//    otherwise pg-mem caches the result and every row gets the same uuid,
+//    which collides on the transactions primary key.
 const db = newDb();
 db.public.registerFunction({
   name: 'gen_random_uuid',
@@ -29,22 +35,23 @@ db.public.registerFunction({
   implementation: () => crypto.randomUUID(),
 });
 
-// 3) حقن pool داخل db.js.
+// 3) Inject the pg-mem pool into db.js (dynamic import, after env setup).
 const MockPool = db.adapters.createPg().Pool;
 const pool = new MockPool();
 const { setPool } = await import('../src/config/db.js');
 setPool(pool);
 
-// 4) تطبيق كل الـ migrations بالترتيب الترقيمي (مع إزالة CREATE EXTENSION لـ pg-mem).
+// 4) Apply every migration in numeric order (CREATE EXTENSION is stripped
+//    because pg-mem does not support it).
 const migrationsDir = path.join(process.cwd(), 'migrations');
 for (const file of fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()) {
   const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8')
     .replace(/CREATE EXTENSION[^;]*;/gi, '');
   db.public.none(sql);
-  console.log(`   ✓ Migration: ${file}`);
+  console.log(`[demo] migration applied: ${file}`);
 }
 
-// 5) البذر: مستخدمان، 4 تصنيفات، 12 براداً، أغراض موزّعة، وحركات عيّنة.
+// 5) Seed: two users, four categories, twelve fridges, items, and movements.
 const adminId = '11111111-1111-1111-1111-111111111111';
 const staffId = '22222222-2222-2222-2222-222222222222';
 
@@ -55,7 +62,7 @@ const cats = {
   saucen: crypto.randomUUID(),
 };
 
-// 12 براداً بترتيب ثابت.
+// Twelve fridges in fixed display order.
 const fridges = Array.from({ length: 12 }, (_, i) => ({
   id: crypto.randomUUID(),
   name: `Kühlschrank ${i + 1}`,
@@ -63,15 +70,16 @@ const fridges = Array.from({ length: 12 }, (_, i) => ({
 }));
 const K = (n) => fridges[n - 1].id;
 
-// الأغراض: [name, unit, stock, min, catId, locationId|null, isOrdered]
-// نفس المادة في برادين = صفّان مستقلان (لكلٍّ رصيده وحدّه) — Gouda في K1 و K7.
+// Items: [name, unit, stock, min, categoryId, locationId|null, isOrdered].
+// The same product in two fridges is two independent rows, each with its own
+// balance and threshold — e.g. Gouda in K1 and K7.
 const items = [
-  // Brot & Gebäck — على الرفّ (بلا براد)
+  // Brot & Gebaeck — shelf storage (no fridge)
   ['Kaisersemmel', 'Stück', 48, 20, cats.brot, null, false],
   ['Kornspitz', 'Stück', 12, 20, cats.brot, null, false],
   ['Mohnflesserl', 'Stück', 18, 10, cats.brot, null, false],
   ['Brezel', 'Stück', 6, 15, cats.brot, null, true],
-  // Käse
+  // Kaese
   ['Gouda', 'kg', 4.5, 2, cats.kaese, K(1), false],
   ['Gouda', 'kg', 1.5, 1, cats.kaese, K(7), false],
   ['Emmentaler', 'kg', 1.2, 1.5, cats.kaese, K(1), false],
@@ -112,7 +120,7 @@ db.public.none(`
     .join(',\n  ')};
 `);
 
-// حركات عيّنة (السجل الثابت [INV-3]) — لترى Verlauf ممتلئاً فوراً: جاي/رايح/فاسد/تصحيح.
+// Sample movements for the history view: inflow, outflow, waste, adjustment.
 const byName = (n, loc) =>
   items.find(({ row }) => row[0] === n && (loc === undefined || row[5] === loc)).id;
 const seedTx = [
@@ -132,8 +140,8 @@ db.public.none(`
     .join(',\n  ')};
 `);
 
-console.log('✅ Seed fertig — 2 Benutzer, 4 Kategorien, 12 Kühlschränke, 17 Artikel, 6 Bewegungen');
-console.log('   Login: admin@demo.com / staff@demo.com — Passwort: demo');
+console.log('[demo] seed complete: 2 users, 4 categories, 12 fridges, 17 items, 6 movements');
+console.log('[demo] login: admin@demo.com / staff@demo.com — password: demo');
 
-// 6) تشغيل الخادم.
+// 6) Start the server (dynamic import, everything is ready).
 await import('../src/server.js');

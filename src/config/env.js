@@ -1,33 +1,33 @@
 /**
  * env.js
- * الطبقة: config — تحميل متغيرات البيئة من .env والتحقق من وجود كل متغير مطلوب.
- * المسؤولية: مصدر واحد موثوق لكل الإعدادات؛ يفشل بسرعة وبوضوح إن نقص أي سر (القسم 2).
- * لا سرّ واحد مكتوب في الكود — كلها تأتي من هنا.
+ * Layer: config — loads .env and validates every required variable.
+ * Single trusted source for all settings; fails fast at boot if a secret is
+ * missing (CLAUDE.md section 2: no secret is ever hard-coded).
  */
 
 import 'dotenv/config';
 
-/** بيئة الاختبار تستخدم قاعدة منفصلة (القسم 9). */
+/** Test runs use a separate database (CLAUDE.md section 9). */
 const TEST_ENV = 'test';
 
 /**
- * يقرأ متغيراً مطلوباً ويرمي خطأً واضحاً إن كان مفقوداً/فارغاً.
- * السبب: نكشف نقص الإعداد عند الإقلاع لا عند أول طلب في وقت التشغيل.
- * @param {string} name اسم المتغير في البيئة.
- * @returns {string} قيمة المتغير بعد قصّ الفراغات.
- * @throws {Error} إذا لم يكن المتغير معرَّفاً أو كان فارغاً.
+ * Reads a required variable, throwing a clear error when missing or empty,
+ * so misconfiguration surfaces at boot rather than on the first request.
+ * @param {string} name Environment variable name.
+ * @returns {string} Trimmed value.
+ * @throws {Error} When the variable is undefined or blank.
  */
 function required(name) {
   const value = process.env[name];
   if (value === undefined || value.trim() === '') {
-    throw new Error(`متغير البيئة المطلوب مفقود: ${name} — راجع .env.example`);
+    throw new Error(`Missing required environment variable: ${name} — see .env.example`);
   }
   return value.trim();
 }
 
 /**
- * يقرأ متغيراً اختيارياً ويعيد null عند غيابه/فراغه.
- * @param {string} name اسم المتغير.
+ * Reads an optional variable, returning null when missing or empty.
+ * @param {string} name Environment variable name.
  * @returns {string|null}
  */
 function optional(name) {
@@ -40,17 +40,18 @@ function optional(name) {
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
 
-// في بيئة الاختبار نُلزم استخدام قاعدة الاختبار المنفصلة حتى لا تُلمَس بيانات التطوير/الإنتاج.
+// Tests must run against the dedicated test database so development and
+// production data are never touched.
 const databaseUrl =
   nodeEnv === TEST_ENV ? required('TEST_DATABASE_URL') : required('DATABASE_URL');
 
 const port = Number.parseInt(process.env.PORT ?? '3000', 10);
 if (!Number.isInteger(port) || port <= 0) {
-  throw new Error(`PORT غير صالح: "${process.env.PORT}" — يجب أن يكون رقماً موجباً`);
+  throw new Error(`Invalid PORT: "${process.env.PORT}" — must be a positive integer`);
 }
 
-// إعدادات Supabase Auth.
-// المشاريع الحديثة قد تستخدم JWKS/ES256 بدلاً من JWT secret/HS256.
+// Supabase Auth settings. Newer Supabase projects sign tokens with
+// ES256 via JWKS; legacy projects use a shared HS256 JWT secret.
 const supabaseUrl = optional('SUPABASE_URL');
 const supabaseJwtSecret = optional('SUPABASE_JWT_SECRET');
 const supabaseJwksUrl =
@@ -60,12 +61,12 @@ const supabaseJwksJson = optional('SUPABASE_JWKS_JSON');
 
 if (!supabaseJwtSecret && !supabaseJwksUrl && !supabaseJwksJson) {
   throw new Error(
-    'واحد من SUPABASE_JWT_SECRET أو SUPABASE_JWKS_URL أو SUPABASE_JWKS_JSON مطلوب للتحقق من توكنات Supabase',
+    'One of SUPABASE_JWT_SECRET, SUPABASE_JWKS_URL or SUPABASE_JWKS_JSON is required to verify Supabase tokens',
   );
 }
 
-// منشأ/مناشئ الواجهة المسموح لها بـ CORS (المرحلة 5).
-// يقبل قائمة مفصولة بفواصل لأن Vite قد يعرض localhost أو 127.0.0.1 أثناء التطوير.
+// Frontend origins allowed by CORS. Accepts a comma-separated list because
+// Vite may serve on localhost or 127.0.0.1 during development.
 const corsOrigin = process.env.CORS_ORIGIN?.trim() || 'http://localhost:5173,http://127.0.0.1:5173';
 const corsOrigins = corsOrigin
   .split(',')
@@ -73,7 +74,7 @@ const corsOrigins = corsOrigin
   .filter(Boolean);
 
 /**
- * إعدادات التطبيق — كائن مجمَّد لمنع أي تعديل عرضي أثناء التشغيل.
+ * Application settings, frozen to prevent accidental mutation at runtime.
  * @type {Readonly<{ nodeEnv: string, isTest: boolean, port: number, databaseUrl: string, supabaseUrl: string|null, supabaseJwtSecret: string|null, supabaseJwksUrl: string|null, supabaseJwksJson: string|null, corsOrigin: string, corsOrigins: string[] }>}
  */
 export const env = Object.freeze({

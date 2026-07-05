@@ -1,8 +1,10 @@
 /**
  * items.service.js
- * الطبقة: service — منطق أعمال العناصر + التحقق من المدخلات.
- * يفرض: [INV-4] min_stock_level numeric (نصّ عشري بلا float)، [INV-6] وحدة أساسية واحدة.
- * لا يتحكّم بـ current_stock: الرصيد يتغيّر عبر حركات مسجّلة فقط [INV-3] (transactions.service).
+ * Layer: service — item business logic and input validation.
+ * Enforces: [INV-4] min_stock_level stays a decimal string (no floats),
+ * [INV-6] one base unit per item.
+ * Never touches current_stock: balances change only through ledger-recorded
+ * movements [INV-3] (see transactions.service).
  */
 
 import { NotFoundError } from '../../shared/errors.js';
@@ -14,11 +16,11 @@ import {
   updateItem,
 } from './items.repository.js';
 
-/** الحدّ الأدنى الافتراضي عند عدم تمريره (يطابق افتراضي قاعدة البيانات). */
+/** Default alert threshold when none is provided (matches the DB default). */
 const DEFAULT_MIN_STOCK = '1';
 
 /**
- * يعيد كل العناصر (لقائمة الواجهة).
+ * Returns all items for the frontend list.
  * @returns {Promise<object[]>}
  */
 export async function getItems() {
@@ -26,30 +28,32 @@ export async function getItems() {
 }
 
 /**
- * يعيد عنصراً واحداً بمعرّفه.
+ * Returns a single item by id.
  * @param {string} itemId
  * @returns {Promise<object>}
- * @throws {NotFoundError} إن لم يوجد العنصر.
+ * @throws {NotFoundError} When the item does not exist.
  */
 export async function getItem(itemId) {
   const id = assertNonEmptyString(itemId, 'itemId');
   const item = await findItemById(id);
   if (!item) {
-    throw new NotFoundError('العنصر غير موجود');
+    throw new NotFoundError('Item not found');
   }
   return item;
 }
 
 /**
- * يُنشئ عنصراً جديداً (إنشاء سريع لمادة جديدة — القسم 7).
- * يبدأ الرصيد صفراً؛ أي كمية ابتدائية تُسجَّل لاحقاً بحركة in [INV-3].
+ * Creates a new item (quick creation for a new ingredient, section 7).
+ * Stock starts at zero; any opening quantity is booked later as an "in"
+ * movement [INV-3].
  * @param {object} input
- * @param {string} input.name اسم العنصر.
- * @param {string} input.unit الوحدة الأساسية [INV-6].
- * @param {string|number} [input.minStockLevel] حدّ التنبيه (موجب)؛ الافتراضي 1.
- * @param {string|null} [input.categoryId] تصنيف اختياري.
- * @returns {Promise<object>} العنصر المُنشأ.
- * @throws {ValidationError} لمدخلات غير صالحة.
+ * @param {string} input.name
+ * @param {string} input.unit Base unit [INV-6].
+ * @param {string|number} [input.minStockLevel] Alert threshold; defaults to 1.
+ * @param {string|null} [input.categoryId]
+ * @param {string|null} [input.locationId]
+ * @returns {Promise<object>} The created item.
+ * @throws {ValidationError} For invalid input.
  */
 export async function addItem({ name, unit, minStockLevel, categoryId, locationId }) {
   const cleanName = assertNonEmptyString(name, 'name');
@@ -69,36 +73,42 @@ export async function addItem({ name, unit, minStockLevel, categoryId, locationI
 }
 
 /**
- * يعدّل بيانات عنصر الوصفية (لا يمسّ الرصيد [INV-3]).
- * تحديث جزئي: تُمرَّر فقط الحقول المراد تغييرها.
+ * Updates an item's metadata (never the balance [INV-3]).
+ * Partial update: only the provided fields are validated and changed.
  * @param {string} itemId
  * @param {object} changes
  * @param {string} [changes.name]
  * @param {string} [changes.unit]
  * @param {string|number} [changes.minStockLevel]
  * @param {string|null} [changes.categoryId]
- * @returns {Promise<object>} العنصر بعد التعديل.
- * @throws {NotFoundError} إن لم يوجد العنصر.
- * @throws {ValidationError} لمدخلات غير صالحة.
+ * @param {string|null} [changes.locationId]
+ * @returns {Promise<object>} The updated item.
+ * @throws {NotFoundError} When the item does not exist.
+ * @throws {ValidationError} For invalid input.
  */
-export async function editItem(itemId, changes) {
+export async function editItem(itemId, changes = {}) {
   const id = assertNonEmptyString(itemId, 'itemId');
 
-  // نتحقّق فقط من الحقول المُمرَّرة (تحديث جزئي).
-  const name =
-    changes.name === undefined ? null : assertNonEmptyString(changes.name, 'name');
-  const unit =
-    changes.unit === undefined ? null : assertNonEmptyString(changes.unit, 'unit');
-  const minStockLevel =
-    changes.minStockLevel === undefined
-      ? null
-      : assertPositiveQuantity(changes.minStockLevel, 'minStockLevel');
-  const categoryId = changes.categoryId === undefined ? null : changes.categoryId;
-  const locationId = changes.locationId === undefined ? null : changes.locationId;
+  const patch = {};
+  if (Object.hasOwn(changes, 'name')) {
+    patch.name = assertNonEmptyString(changes.name, 'name');
+  }
+  if (Object.hasOwn(changes, 'unit')) {
+    patch.unit = assertNonEmptyString(changes.unit, 'unit');
+  }
+  if (Object.hasOwn(changes, 'minStockLevel')) {
+    patch.minStockLevel = assertPositiveQuantity(changes.minStockLevel, 'minStockLevel');
+  }
+  if (Object.hasOwn(changes, 'categoryId')) {
+    patch.categoryId = changes.categoryId ?? null;
+  }
+  if (Object.hasOwn(changes, 'locationId')) {
+    patch.locationId = changes.locationId ?? null;
+  }
 
-  const item = await updateItem(id, { name, unit, minStockLevel, categoryId, locationId });
+  const item = await updateItem(id, patch);
   if (!item) {
-    throw new NotFoundError('العنصر غير موجود');
+    throw new NotFoundError('Item not found');
   }
   return item;
 }

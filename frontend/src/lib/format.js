@@ -1,11 +1,13 @@
 /**
- * format.js — أدوات عرض للكميات وحالة المخزون.
- * الكميات نصوص numeric من الـ backend؛ التحويل إلى Number هنا للعرض فقط [INV-4].
+ * format.js — display helpers for quantities and stock status.
+ * Quantities arrive as numeric strings from the backend; converting to Number
+ * here is for display only, never for stored arithmetic [INV-4].
  */
 
 /**
- * يطبّع مدخل كمية من المستخدم: فاصلة ألمانية "2,5" → "2.5"، مع قصّ الفراغات.
- * (لوحات المفاتيح النمساوية/الألمانية تكتب الفاصلة — بدون هذا يُرفض كل إدخال كسري.)
+ * Normalizes user quantity input: German decimal comma ("2,5") becomes "2.5",
+ * whitespace is trimmed. Austrian/German keyboards type the comma — without
+ * this every fractional entry would be rejected.
  * @param {string} value
  * @returns {string}
  */
@@ -13,12 +15,12 @@ export function normalizeDecimalInput(value) {
   return String(value ?? '').trim().replace(',', '.');
 }
 
-/** نمط رقم عشري موجب (مطابق لتحقّق الـ backend). */
+/** Positive decimal pattern (mirrors the backend validation). */
 export const POSITIVE_DECIMAL = /^\d+(\.\d+)?$/;
 
 /**
- * يعرض رقماً بلا ضجيج float (يقصّ إلى 3 منازل ويزيل الأصفار الزائدة).
- * مثال: 1.2000000000000002 → "1.2".
+ * Renders a number without float noise (rounded to 3 decimals, trailing
+ * zeros dropped). Example: 1.2000000000000002 renders as "1.2".
  * @param {number|string} value
  * @returns {string}
  */
@@ -28,17 +30,17 @@ export function formatNumber(value) {
   return String(Math.round(n * 1000) / 1000);
 }
 
-/** يعرض كمية نصية كما هي (مع تنظيف بسيط). */
+/** Renders a quantity string for display. */
 export function formatQty(value) {
   return formatNumber(String(value ?? '').trim());
 }
 
 /**
- * حالة المخزون:
- *   'ordered'  — عند/تحت الحد لكنه مطلوب (القسم 7).
- *   'critical' — عند/تحت الحد ولم يُطلَب.
- *   'low'      — ≤ ضعف الحد.
- *   'ok'       — كافٍ.
+ * Stock status of an item:
+ *   'ordered'  — at/below minimum but already ordered (section 7).
+ *   'critical' — at/below minimum, not ordered yet.
+ *   'low'      — within twice the minimum.
+ *   'ok'       — sufficient.
  * @param {{current_stock: string, min_stock_level: string, is_ordered: boolean}} item
  */
 export function stockStatus(item) {
@@ -49,7 +51,7 @@ export function stockStatus(item) {
   return 'ok';
 }
 
-/** التسمية الألمانية لحالة المخزون. */
+/** German labels for stock status. */
 export const STATUS_LABEL = {
   ordered: 'Bestellt',
   critical: 'Kritisch',
@@ -57,7 +59,7 @@ export const STATUS_LABEL = {
   ok: 'Ausreichend',
 };
 
-/** أصناف شارة الحالة (خلفية ناعمة + نص بلون الحالة). */
+/** Status badge classes (soft background + status-colored text). */
 export const STATUS_BADGE = {
   ok: 'bg-ok-soft text-ok',
   low: 'bg-warn-soft text-warn',
@@ -65,10 +67,10 @@ export const STATUS_BADGE = {
   critical: 'bg-critical-soft text-critical',
 };
 
-/** ترتيب شدّة الحالة (للفرز: الأشد أولاً). */
+/** Severity rank for sorting (most urgent first). */
 export const STATUS_RANK = { critical: 0, ordered: 1, low: 2, ok: 3 };
 
-/** تسميات أنواع الحركات (سجل Verlauf). */
+/** German labels for movement types (history view). */
 export const TX_LABEL = {
   in: 'Eingang',
   out: 'Entnahme',
@@ -76,7 +78,7 @@ export const TX_LABEL = {
   adjustment: 'Korrektur',
 };
 
-/** ألوان أنواع الحركات: شارة ناعمة + لون كمية. */
+/** Movement type badge classes. */
 export const TX_BADGE = {
   in: 'bg-ok-soft text-ok',
   out: 'bg-crust-soft text-crust-dark',
@@ -85,9 +87,10 @@ export const TX_BADGE = {
 };
 
 /**
- * يعرض وقتاً بتوقيت Europe/Vienna [INV-5] بصيغة ألمانية قصيرة.
- * @param {string} iso timestamptz من الـ backend.
- * @returns {string} مثل "02.07., 14:30".
+ * Formats a timestamp in the Europe/Vienna timezone [INV-5], short German
+ * style, e.g. "02.07., 14:30".
+ * @param {string} iso timestamptz from the backend.
+ * @returns {string}
  */
 export function formatDateTime(iso) {
   try {

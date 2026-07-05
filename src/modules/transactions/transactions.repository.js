@@ -1,24 +1,28 @@
 /**
  * transactions.repository.js
- * الطبقة: repository — استعلامات SQL لحركات المخزون فقط. لا منطق أعمال.
- * يفرض على مستوى SQL: [INV-1] لا رصيد سالب (UPDATE شرطي ذرّي)، [INV-3] السجل ثابت (INSERT فقط).
+ * Layer: repository — SQL for stock movements only. No business logic.
+ * SQL-level enforcement of: [INV-1] no negative stock (conditional atomic
+ * UPDATE), [INV-3] immutable ledger (INSERT only).
  *
- * دوال الكتابة تستقبل `client` (عميل معاملة) لتنفَّذ ضمن نفس الـ transaction [INV-2]؛
- * القراءات العامة (سجل الحركات) تستخدم query على الـ pool مباشرة.
- * القاعدة (القسم 2): كل SQL يدوي و parameterized عبر node-postgres.
+ * Write functions take a transaction `client` so they run inside the wrapping
+ * transaction [INV-2]; plain reads (movement history) use the pool directly.
+ * All SQL is hand-written and parameterized via node-postgres (section 2).
  */
 
 import { query } from '../../config/db.js';
 
 /**
- * ينقص رصيد عنصر بمقدار موجب، ذرّياً، شرط توفّر الرصيد.
- * ⚠️ [INV-1] UPDATE شرطي ذرّي واحد — لا تحوّله أبداً إلى SELECT ثم UPDATE:
- *    الشرط `current_stock >= $qty` داخل نفس الجملة يمنع الـ Race Condition (سحبان متوازيان).
- *    صفر صفوف راجعة = رصيد غير كافٍ (يترجمها الـ service إلى رفض).
- * @param {import('pg').PoolClient} client عميل المعاملة.
- * @param {string} itemId معرّف العنصر.
- * @param {string|number} quantity الكمية المسحوبة (موجبة).
- * @returns {Promise<object | null>} صفّ العنصر بعد التحديث، أو null إن لم يكفِ الرصيد.
+ * Decrements an item's stock by a positive amount, atomically, only when
+ * enough stock exists.
+ *
+ * [INV-1] This is a single conditional atomic UPDATE. Never split it into
+ * SELECT-then-UPDATE: the `current_stock >= $qty` guard inside the statement
+ * is what prevents the race between two concurrent withdrawals.
+ * Zero rows returned = insufficient stock (the service turns it into a 409).
+ * @param {import('pg').PoolClient} client Transaction client.
+ * @param {string} itemId Item id.
+ * @param {string|number} quantity Positive amount to withdraw.
+ * @returns {Promise<object | null>} Updated row, or null when stock was insufficient.
  */
 export async function decrementStock(client, itemId, quantity) {
   const { rows } = await client.query(
@@ -31,14 +35,15 @@ export async function decrementStock(client, itemId, quantity) {
 }
 
 /**
- * يزيد رصيد عنصر بمقدار موجب، ذرّياً (عملية الاستلام — حركة in حصراً).
- * لا شرط رصيد هنا (الإضافة لا تُنقص). يعيد null إن كان العنصر غير موجود.
- * ملاحظة: يعيد is_ordered إلى false لأن الاستلام يعني وصول التوصيلة (القسم 7) —
- * وهذا مقصور على الاستلام؛ التسويات/التراجع تستخدم applyStockDelta ولا تمسّ العلم.
- * @param {import('pg').PoolClient} client عميل المعاملة.
- * @param {string} itemId معرّف العنصر.
- * @param {string|number} quantity الكمية المضافة (موجبة).
- * @returns {Promise<object | null>} صفّ العنصر بعد التحديث، أو null إن لم يوجد العنصر.
+ * Increments an item's stock by a positive amount (goods receipt — the "in"
+ * movement only). No stock guard needed since additions cannot go negative.
+ * Also resets is_ordered to false because a receipt means the delivery
+ * arrived (section 7); adjustments/undo use applyStockDelta and leave the
+ * flag untouched.
+ * @param {import('pg').PoolClient} client Transaction client.
+ * @param {string} itemId Item id.
+ * @param {string|number} quantity Positive amount to add.
+ * @returns {Promise<object | null>} Updated row, or null when the item does not exist.
  */
 export async function incrementStock(client, itemId, quantity) {
   const { rows } = await client.query(
@@ -51,13 +56,14 @@ export async function incrementStock(client, itemId, quantity) {
 }
 
 /**
- * يطبّق فرقاً موقّعاً على الرصيد ذرّياً مع منع النزول تحت الصفر [INV-1].
- * يُستخدم في التسويات (adjustment) التي قد تكون موجبة أو سالبة.
- * الشرط `current_stock + $delta >= 0` يضمن عدم وجود رصيد سالب حتى مع دلتا سالبة.
- * @param {import('pg').PoolClient} client عميل المعاملة.
- * @param {string} itemId معرّف العنصر.
- * @param {string|number} delta الفرق الموقّع (+/-).
- * @returns {Promise<object | null>} صفّ العنصر بعد التحديث، أو null إن نتج رصيد سالب/عنصر غير موجود.
+ * Applies a signed delta to the stock atomically while preventing it from
+ * going below zero [INV-1]. Used for adjustments (which may be positive or
+ * negative); the `current_stock + $delta >= 0` guard covers negative deltas.
+ * @param {import('pg').PoolClient} client Transaction client.
+ * @param {string} itemId Item id.
+ * @param {string|number} delta Signed difference (+/-).
+ * @returns {Promise<object | null>} Updated row, or null when the result would
+ *   be negative or the item does not exist.
  */
 export async function applyStockDelta(client, itemId, delta) {
   const { rows } = await client.query(
@@ -70,17 +76,18 @@ export async function applyStockDelta(client, itemId, delta) {
 }
 
 /**
- * يُدرج صفّ حركة في السجل الثابت [INV-3]. INSERT فقط — لا UPDATE/DELETE أبداً.
- * created_at يُترك لقيمة السيرفر الافتراضية (now()) لضمان ترتيب زمني موثوق.
- * @param {import('pg').PoolClient} client عميل المعاملة.
- * @param {object} tx بيانات الحركة.
+ * Inserts a row into the immutable ledger [INV-3]. INSERT only — never
+ * UPDATE/DELETE. created_at is left to the server default (now()) for a
+ * trustworthy chronological order.
+ * @param {import('pg').PoolClient} client Transaction client.
+ * @param {object} tx Movement data.
  * @param {string} tx.itemId
  * @param {string} tx.userId
  * @param {'in'|'out'|'waste'|'adjustment'} tx.type
- * @param {string|number} tx.quantityChange موجب=إدخال، سالب=سحب.
+ * @param {string|number} tx.quantityChange Positive = inflow, negative = outflow.
  * @param {string|null} [tx.note]
- * @param {string|null} [tx.reversesTransactionId] الحركة الأصلية عند التصحيح.
- * @returns {Promise<object>} صفّ الحركة المُدرَج.
+ * @param {string|null} [tx.reversesTransactionId] Original movement when reversing.
+ * @returns {Promise<object>} The inserted row.
  */
 export async function insertTransaction(client, tx) {
   const { rows } = await client.query(
@@ -101,10 +108,10 @@ export async function insertTransaction(client, tx) {
 }
 
 /**
- * يجلب حركة بمعرّفها (للتحقق قبل التراجع). قراءة فقط.
- * @param {import('pg').PoolClient} client عميل المعاملة.
+ * Fetches a movement by id (pre-undo check). Read only.
+ * @param {import('pg').PoolClient} client Transaction client.
  * @param {string} transactionId
- * @returns {Promise<object | null>} صفّ الحركة أو null.
+ * @returns {Promise<object | null>}
  */
 export async function findTransactionById(client, transactionId) {
   const { rows } = await client.query(
@@ -115,10 +122,10 @@ export async function findTransactionById(client, transactionId) {
 }
 
 /**
- * يتحقّق إن كانت حركة ما قد تُرِاجِعت من قبل (لمنع التراجع المزدوج) [INV-3].
- * @param {import('pg').PoolClient} client عميل المعاملة.
- * @param {string} transactionId الحركة الأصلية.
- * @returns {Promise<boolean>} true إن وُجدت حركة تشير إليها عبر reverses_transaction_id.
+ * Checks whether a movement was already reversed (prevents double undo) [INV-3].
+ * @param {import('pg').PoolClient} client Transaction client.
+ * @param {string} transactionId Original movement id.
+ * @returns {Promise<boolean>} True when a reversal references it.
  */
 export async function hasReversal(client, transactionId) {
   const { rows } = await client.query(
@@ -129,13 +136,15 @@ export async function hasReversal(client, transactionId) {
 }
 
 /**
- * يقرأ سجل الحركات (الأحدث أولاً) مع اسم العنصر والمستخدم والقسم — قراءة فقط من
- * السجل الثابت [INV-3]. الفلاتر اختيارية وتُجمَّع ديناميكياً مع بقاء كل القيم parameterized.
+ * Reads the movement history (newest first) with item, user, and location
+ * names joined — a read-only view of the immutable ledger [INV-3].
+ * Filters are optional; the WHERE clause is assembled dynamically but every
+ * value stays parameterized.
  * @param {object} filters
- * @param {string|null} [filters.itemId] حصر بعنصر.
- * @param {string|null} [filters.locationId] حصر بقسم (براد).
- * @param {string|null} [filters.type] حصر بنوع (in|out|waste|adjustment).
- * @param {number} [filters.limit] حدّ أقصى للصفوف (افتراضي 50).
+ * @param {string|null} [filters.itemId] Restrict to one item.
+ * @param {string|null} [filters.locationId] Restrict to one location (fridge).
+ * @param {string|null} [filters.type] Restrict to in|out|waste|adjustment.
+ * @param {number} [filters.limit] Maximum rows (default 50).
  * @returns {Promise<object[]>}
  */
 export async function listTransactions({ itemId, locationId, type, limit = 50 } = {}) {
@@ -159,6 +168,10 @@ export async function listTransactions({ itemId, locationId, type, limit = 50 } 
   const { rows } = await query(
     `SELECT t.id, t.type, t.quantity_change, t.note, t.created_at,
             t.reverses_transaction_id, t.item_id,
+            EXISTS (
+              SELECT 1 FROM transactions r
+              WHERE r.reverses_transaction_id = t.id
+            ) AS is_reversed,
             i.name AS item_name, i.unit,
             u.name AS user_name,
             l.name AS location_name

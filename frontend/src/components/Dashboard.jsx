@@ -1,12 +1,15 @@
 /**
- * Dashboard.jsx — شاشة Übersicht: نظرة الصباح قبل الفتح.
- * البؤرة: "ما الذي يحتاج انتباهي الآن؟" — عدّادات الحالة ثم قائمة الأشدّ نقصاً.
- * تُحسب من /items مباشرة (استعلام لحظي — لا jobs، القسم 10).
+ * Dashboard.jsx — Übersicht: the morning check before opening.
+ * Focal question: "what needs my attention right now?" — status counters
+ * followed by the largest shortfalls. Computed directly from /items (live
+ * query, no scheduled jobs — section 10).
  */
 
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { formatQty, formatNumber, stockStatus } from '../lib/format.js';
+
+const ATTENTION_LIST_SIZE = 5;
 
 export default function Dashboard({ goTo }) {
   const [items, setItems] = useState(null);
@@ -46,7 +49,7 @@ export default function Dashboard({ goTo }) {
       (Number(b.min_stock_level) - Number(b.current_stock)) -
       (Number(a.min_stock_level) - Number(a.current_stock)),
     )
-    .slice(0, 5);
+    .slice(0, ATTENTION_LIST_SIZE);
 
   const tiles = [
     { label: 'Artikel gesamt', value: items.length, tone: 'text-ink' },
@@ -57,7 +60,7 @@ export default function Dashboard({ goTo }) {
 
   return (
     <div>
-      {/* عدّادات الحالة */}
+      {/* Status counters */}
       <div className="grid grid-cols-2 gap-3">
         {tiles.map((t) => (
           <div key={t.label} className="rounded-2xl bg-surface shadow-card p-4">
@@ -67,13 +70,13 @@ export default function Dashboard({ goTo }) {
         ))}
       </div>
 
-      {/* يحتاج انتباهك */}
+      {/* Needs attention */}
       <div className="mt-5">
         <div className="flex items-baseline justify-between">
           <h2 className="font-bold">Braucht Aufmerksamkeit</h2>
           {attention.length > 0 && (
             <button onClick={() => goTo('alerts')} className="text-sm font-semibold text-crust hover:text-crust-dark min-h-[36px]">
-              Alle Warnungen →
+              Alle Warnungen
             </button>
           )}
         </div>
@@ -107,7 +110,7 @@ export default function Dashboard({ goTo }) {
         )}
       </div>
 
-      {/* اختصار للعمل اليومي */}
+      {/* Shortcut into the daily workflow */}
       <button
         onClick={() => goTo('items')}
         className="mt-5 w-full min-h-[48px] rounded-xl bg-crust font-semibold text-white hover:bg-crust-dark pressable transition-colors"

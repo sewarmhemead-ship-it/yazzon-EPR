@@ -1,32 +1,33 @@
 /*
- * index.css — نظام التصميم (Tailwind v4): "طاولة عمل دافئة" لمقهى/مخبز نمساوي.
- * اللوحة من عالم المحل: ورق كرافت، قشرة الخبز (اللكنة الوحيدة)، فحمي الفرن للنص،
- * ودرجات حالة للمخزون. العمق: حدود خافتة + ظلّ بطاقة هامس واحد (استراتيجية واحدة).
- * الكثافة: أساس 4px؛ أهداف لمس ≥ 44px للموبايل.
+ * index.css — design system (Tailwind v4): "warm workbench" for an Austrian
+ * bakery/cafe. The palette comes from the shop itself: kraft paper surfaces,
+ * bread-crust as the single accent, oven-charcoal ink, and stock-status
+ * colors. Depth strategy: faint borders plus one whisper-quiet card shadow.
+ * Density: 4px base unit; touch targets of at least 44px on mobile.
  */
 
 @import "tailwindcss";
 
 @theme {
-  /* الأسطح — ورق دافئ ثم أبيض للبطاقات */
-  --color-paper: #f7f3ec;       /* خلفية القاعدة (كرافت فاتح) */
-  --color-surface: #fffdf9;     /* بطاقات */
-  --color-surface-2: #fdf9f2;   /* سطح مرتفع خطوة (قوائم/حوارات) */
-  --color-line: rgba(87, 66, 38, 0.12);       /* حدود خافتة دافئة */
-  --color-line-soft: rgba(87, 66, 38, 0.07);  /* فواصل أخف */
+  /* Surfaces — warm paper base, near-white cards */
+  --color-paper: #f7f3ec;
+  --color-surface: #fffdf9;
+  --color-surface-2: #fdf9f2;   /* one elevation step up (menus/dialogs) */
+  --color-line: rgba(87, 66, 38, 0.12);
+  --color-line-soft: rgba(87, 66, 38, 0.07);
 
-  /* النص — 4 مستويات */
-  --color-ink: #2b241a;         /* أساسي (فحمي دافئ) */
-  --color-ink-2: #5c5243;       /* ثانوي */
-  --color-muted: #8f8371;       /* وصفي */
-  --color-faint: #b5aa97;       /* خافت/معطّل */
+  /* Text — four tiers */
+  --color-ink: #2b241a;         /* primary (warm near-black) */
+  --color-ink-2: #5c5243;       /* secondary */
+  --color-muted: #8f8371;       /* metadata */
+  --color-faint: #b5aa97;       /* faint/disabled */
 
-  /* اللكنة الوحيدة — قشرة الخبز */
+  /* The single accent — bread crust */
   --color-crust: #b45309;
   --color-crust-dark: #8f3f06;
-  --color-crust-soft: #f6e7d4;  /* خلفية لمسات اللكنة */
+  --color-crust-soft: #f6e7d4;
 
-  /* حالات المخزون */
+  /* Stock status */
   --color-ok: #3f6f42;
   --color-ok-soft: #e6efe4;
   --color-warn: #b07816;
@@ -36,7 +37,7 @@
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  /* ظلّ البطاقة الهامس (حلقة 1px + عمقان ناعمان) */
+  /* Card shadow: 1px ring plus two soft depth layers */
   --shadow-card: 0 0 0 1px rgba(87, 66, 38, 0.06), 0 1px 2px -1px rgba(87, 66, 38, 0.06),
     0 2px 6px rgba(87, 66, 38, 0.05);
   --shadow-float: 0 0 0 1px rgba(87, 66, 38, 0.07), 0 8px 24px -6px rgba(43, 36, 26, 0.18);
@@ -60,17 +61,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* أرقام جدولية لكل قيمة متغيّرة — تمنع قفز التخطيط */
+/* Tabular numerals for every dynamic value — prevents layout shift. */
 .tnum {
   font-variant-numeric: tabular-nums;
 }
 
-/* عناوين متوازنة الأسطر */
 h1, h2, h3 {
   text-wrap: balance;
 }
 
-/* أرضية الجودة: احترام تفضيل تقليل الحركة */
+/* Respect the reduced-motion preference. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -80,14 +80,14 @@ h1, h2, h3 {
   }
 }
 
-/* تركيز واضح للوحة المفاتيح */
+/* Visible keyboard focus on all interactive elements. */
 :where(button, a, input, select, textarea, [role="tab"]):focus-visible {
   outline: 2px solid var(--color-crust);
   outline-offset: 2px;
   border-radius: 6px;
 }
 
-/* دخول ناعم للحوارات/الأوراق السفلية (transform/opacity فقط) */
+/* Soft entrances for dialogs/bottom sheets (transform/opacity only). */
 @keyframes sheet-up {
   from { transform: translateY(24px); opacity: 0; }
   to   { transform: translateY(0);    opacity: 1; }
@@ -99,14 +99,15 @@ h1, h2, h3 {
 .anim-sheet { animation: sheet-up 220ms cubic-bezier(0.23, 1, 0.32, 1); }
 .anim-fade  { animation: fade-in 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 
-/* ضغط زر ملموس */
+/* Tactile press feedback. */
 .pressable:active {
   transform: scale(0.97);
 }
 
 /*
- * أيقونات بلورية للتنقل: حاوية صغيرة شفافة بدل زخرفة كبيرة.
- * الحواف واللمعة تعطي إحساس زجاج/ثلج مناسب للبرادات، مع بقاء اللمسة من لون القشرة.
+ * Frosted-glass navigation icons: a small translucent container instead of a
+ * large decoration. The edge and highlight give an ice/glass feel that suits
+ * the fridges, while the crust accent stays the only color voice.
  */
 .glass-icon {
   position: relative;
@@ -172,7 +173,7 @@ h1, h2, h3 {
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
 }
 
-/* مساحة أمان لشريط التنقّل السفلي على الموبايل */
+/* Bottom-nav safe area on mobile. */
 .pb-nav {
   padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px));
 }

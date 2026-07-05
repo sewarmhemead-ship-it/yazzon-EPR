@@ -1,18 +1,21 @@
 /**
- * ItemSheet.jsx — ورقة تفاصيل العنصر (سفلية على الموبايل، مركزية على الشاشات الكبيرة).
- * تعرض الرصيد كبيراً + المقياس بخط الحد + كل العمليات:
- * إدخال/سحب (للجميع)، Korrektur وتعليم "بستلت" وتعديل الحد الأدنى (للمدير).
+ * ItemSheet.jsx — item detail sheet (bottom sheet on mobile, centered on
+ * larger screens). Shows the balance prominently with the reorder-line meter
+ * and offers every operation: receive/withdraw for everyone; adjustment,
+ * order flag, minimum, and location changes for admins.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../auth/AuthProvider.jsx';
 import {
   formatQty, stockStatus, STATUS_LABEL, STATUS_BADGE,
-  normalizeDecimalInput, POSITIVE_DECIMAL,
+  normalizeDecimalInput, POSITIVE_DECIMAL, TX_LABEL, TX_BADGE, formatDateTime, formatNumber,
 } from '../lib/format.js';
 import StockMeter from './StockMeter.jsx';
 import QuantityDialog from './QuantityDialog.jsx';
+
+const HISTORY_LIMIT = 5;
 
 export default function ItemSheet({ item, onClose, onChanged, notify }) {
   const { isAdmin } = useAuth();
@@ -21,10 +24,37 @@ export default function ItemSheet({ item, onClose, onChanged, notify }) {
   const [minValue, setMinValue] = useState(item.min_stock_level);
   const [editingLoc, setEditingLoc] = useState(false);
   const [locations, setLocations] = useState([]);
+  const [transactions, setTransactions] = useState(null);
+  const [historyError, setHistoryError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [undoingId, setUndoingId] = useState(null);
   const status = stockStatus(item);
 
-  // تحميل الأقسام عند فتح محرّر الموقع فقط.
+  const loadHistory = useCallback(async () => {
+    try {
+      const { transactions } = await api.listTransactions({ itemId: item.id, limit: HISTORY_LIMIT });
+      setTransactions(transactions);
+      setHistoryError(null);
+    } catch (err) {
+      setTransactions([]);
+      setHistoryError(err.message);
+    }
+  }, [item.id]);
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape' && !dialog) onClose();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, dialog]);
+
+  useEffect(() => {
+    setTransactions(null);
+    loadHistory();
+  }, [loadHistory]);
+
+  // Locations are fetched only when the location editor is opened.
   useEffect(() => {
     if (editingLoc && locations.length === 0) {
       api.listLocations().then(({ locations }) => setLocations(locations)).catch(() => {});
@@ -45,13 +75,19 @@ export default function ItemSheet({ item, onClose, onChanged, notify }) {
     }
   }
 
-  useEffect(() => {
-    function onKey(e) {
-      if (e.key === 'Escape' && !dialog) onClose();
+  async function undoMovement(tx) {
+    setUndoingId(tx.id);
+    try {
+      await api.undo(tx.id);
+      await loadHistory();
+      onChanged(null, item.name);
+      notify(`Buchung rückgängig gemacht: ${item.name}`, 'success');
+    } catch (err) {
+      notify(err.message, 'error');
+    } finally {
+      setUndoingId(null);
     }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, dialog]);
+  }
 
   async function submitDialog({ quantity, type, delta, note }) {
     let result;
@@ -117,12 +153,12 @@ export default function ItemSheet({ item, onClose, onChanged, notify }) {
           className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl bg-surface p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-float anim-sheet"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* الترويسة: اسم + تصنيف + حالة */}
+          {/* Header: name, location, category, status */}
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold">{item.name}</h2>
               <p className="text-xs text-muted mt-0.5">
-                📍 {item.location_name ?? 'Regal'}
+                {item.location_name ?? 'Regal'}
                 {item.category_name && ` · ${item.category_name}`}
               </p>
             </div>
@@ -131,7 +167,7 @@ export default function ItemSheet({ item, onClose, onChanged, notify }) {
             </span>
           </div>
 
-          {/* الرصيد — البؤرة البصرية */}
+          {/* Balance — the focal element */}
           <div className="mt-5">
             <p className="tnum text-4xl font-bold tracking-tight">
               {formatQty(item.current_stock)}
@@ -146,23 +182,23 @@ export default function ItemSheet({ item, onClose, onChanged, notify }) {
             </div>
           </div>
 
-          {/* العمليات اليومية */}
+          {/* Daily operations */}
           <div className="mt-5 grid grid-cols-2 gap-2">
             <button
               onClick={() => setDialog('consume')}
               className="min-h-[48px] rounded-xl border border-line font-semibold text-ink hover:bg-surface-2 pressable transition-colors"
             >
-              − Entnahme
+              Entnahme
             </button>
             <button
               onClick={() => setDialog('receive')}
               className="min-h-[48px] rounded-xl bg-crust font-semibold text-white hover:bg-crust-dark pressable transition-colors"
             >
-              + Eingang
+              Eingang
             </button>
           </div>
 
-          {/* أدوات المدير */}
+          {/* Admin tools */}
           {isAdmin && (
             <div className="mt-4 border-t border-line-soft pt-4 space-y-2">
               <div className="flex flex-wrap gap-2">
@@ -182,12 +218,12 @@ export default function ItemSheet({ item, onClose, onChanged, notify }) {
               {editingLoc && (
                 <select
                   defaultValue={item.location_id ?? ''}
-                  onChange={(e) => e.target.value && moveTo(e.target.value)}
+                  onChange={(e) => moveTo(e.target.value || null)}
                   disabled={busy}
                   className="w-full min-h-[44px] rounded-lg border border-line bg-surface-2 px-3 outline-none focus:border-crust"
                   aria-label="Neuen Ort wählen"
                 >
-                  <option value="" disabled>Kühlschrank wählen …</option>
+                  <option value="">Regal / ohne Kühlschrank</option>
                   {locations.map((l) => (
                     <option key={l.id} value={l.id}>{l.name}</option>
                   ))}
@@ -210,6 +246,69 @@ export default function ItemSheet({ item, onClose, onChanged, notify }) {
               )}
             </div>
           )}
+
+          <section className="mt-5 border-t border-line-soft pt-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold">Letzte Bewegungen</h3>
+              {historyError && <span className="text-xs text-critical">Nicht geladen</span>}
+            </div>
+
+            {transactions === null ? (
+              <div className="mt-2 space-y-2" aria-busy="true">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="h-12 rounded-lg bg-surface-2 animate-pulse" />
+                ))}
+              </div>
+            ) : transactions.length === 0 ? (
+              <p className="mt-2 rounded-lg bg-surface-2 px-3 py-3 text-sm text-muted">
+                Noch keine Bewegungen.
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-2">
+                {transactions.map((tx) => {
+                  const qty = Number(tx.quantity_change);
+                  const canUndo = isAdmin && !tx.reverses_transaction_id && !tx.is_reversed;
+                  return (
+                    <li key={tx.id} className="rounded-lg bg-surface-2 px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${TX_BADGE[tx.type]}`}>
+                              {TX_LABEL[tx.type]}
+                            </span>
+                            {tx.is_reversed && (
+                              <span className="text-[11px] font-semibold text-muted">Storniert</span>
+                            )}
+                            {tx.reverses_transaction_id && (
+                              <span className="text-[11px] font-semibold text-muted">Storno</span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted">
+                            {tx.user_name} · {formatDateTime(tx.created_at)}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className={`tnum text-sm font-bold ${qty < 0 ? (tx.type === 'waste' ? 'text-critical' : 'text-ink-2') : 'text-ok'}`}>
+                            {qty > 0 ? '+' : ''}{formatNumber(tx.quantity_change)} {tx.unit}
+                          </p>
+                          {canUndo && (
+                            <button
+                              onClick={() => undoMovement(tx)}
+                              disabled={undoingId === tx.id}
+                              className="mt-1 min-h-[30px] rounded-md px-2 text-xs font-semibold text-crust hover:bg-crust-soft disabled:opacity-50"
+                            >
+                              Rückgängig
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {tx.note && <p className="mt-1 text-xs text-ink-2 italic">&quot;{tx.note}&quot;</p>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
 
           <button
             onClick={onClose}

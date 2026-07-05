@@ -1,9 +1,8 @@
 /**
  * alerts.service.js
- * الطبقة: service — منطق أعمال التنبيهات.
- * المسؤولية: جلب قائمة النقص، وإدارة علم is_ordered (تعليم/إلغاء الطلب).
- * (أضيفت هذه الطبقة للحفاظ على قاعدة القسم 5: الـ controller بلا منطق أعمال.)
- * التنبيه استعلام لحظي (القسم 10) — لا jobs ولا جداول إضافية.
+ * Layer: service — purchase alert business logic: the low-stock list and the
+ * is_ordered flag. Kept as its own layer so controllers stay logic-free
+ * (section 5). Alerts are a live query (section 10) — no jobs, no extra tables.
  */
 
 import { NotFoundError } from '../../shared/errors.js';
@@ -11,7 +10,8 @@ import { assertNonEmptyString } from '../../shared/validate.js';
 import { getLowStockItems, setItemOrdered } from './alerts.repository.js';
 
 /**
- * يعيد العناصر التي تحتاج شراءً (بلغت حدّها الأدنى أو تحته)، بالترتيب المطلوب (القسم 10).
+ * Returns items that need purchasing (at or below minimum), in the order
+ * defined by section 10.
  * @returns {Promise<object[]>}
  */
 export async function listAlerts() {
@@ -19,18 +19,19 @@ export async function listAlerts() {
 }
 
 /**
- * يعلّم عنصراً بأنه "تم طلبه" (أو يلغي ذلك) — لمنع تكرار التنبيه بعد إرسال طلب الشراء (القسم 7).
- * إعادة is_ordered إلى false عند الاستلام تتم تلقائياً في مسار addStock، لا هنا.
- * @param {string} itemId معرّف العنصر.
- * @param {boolean} isOrdered القيمة الجديدة.
- * @returns {Promise<object>} صفّ العنصر بعد التحديث.
- * @throws {NotFoundError} إن لم يوجد العنصر.
+ * Marks an item as ordered (or clears the mark) so the alert stops repeating
+ * once the purchase order is out (section 7). The flag is reset automatically
+ * on goods receipt inside addStock — not here.
+ * @param {string} itemId Item id.
+ * @param {boolean} isOrdered New flag value.
+ * @returns {Promise<object>} Updated item.
+ * @throws {NotFoundError} When the item does not exist.
  */
 export async function markOrdered(itemId, isOrdered) {
   const id = assertNonEmptyString(itemId, 'itemId');
   const item = await setItemOrdered(id, Boolean(isOrdered));
   if (!item) {
-    throw new NotFoundError('العنصر غير موجود');
+    throw new NotFoundError('Item not found');
   }
   return item;
 }

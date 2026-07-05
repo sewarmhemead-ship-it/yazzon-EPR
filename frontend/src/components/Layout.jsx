@@ -1,7 +1,8 @@
 /**
- * Layout.jsx — الهيكل المستجيب:
- * موبايل: ترويسة مدمجة + شريط تنقّل سفلي (في متناول الإبهام، أهداف ≥44px، safe-area).
- * شاشات كبيرة: ترويسة بتبويبات علوية. أيقونات SVG مدمجة داخل حاوية بلورية CSS.
+ * Layout.jsx — responsive shell.
+ * Mobile: compact header plus a bottom navigation bar (thumb-reachable,
+ * 44px+ targets, safe-area aware). Desktop: header with top tabs.
+ * Inline SVG icons wrapped in a frosted-glass container (no icon deps).
  */
 
 const ICONS = {
@@ -41,7 +42,6 @@ export default function Layout({ profile, tabs, active, onTab, onSignOut, childr
 
   return (
     <div className="min-h-full">
-      {/* الترويسة */}
       <header className="sticky top-0 z-20 border-b border-line-soft bg-paper/85 backdrop-blur">
         <div className="mx-auto max-w-2xl px-4 py-3 flex items-center justify-between">
           <div>
@@ -58,7 +58,7 @@ export default function Layout({ profile, tabs, active, onTab, onSignOut, childr
           </div>
         </div>
 
-        {/* تبويبات الشاشات الكبيرة */}
+        {/* Desktop tabs */}
         <nav className="mx-auto max-w-2xl px-2 hidden sm:flex gap-1" role="tablist" aria-label="Hauptnavigation">
           {tabs.map((tab) => (
             <button
@@ -80,10 +80,10 @@ export default function Layout({ profile, tabs, active, onTab, onSignOut, childr
         </nav>
       </header>
 
-      {/* المحتوى — مساحة سفلية للـ bottom-nav على الموبايل */}
+      {/* Content — bottom padding reserves space for the mobile nav bar. */}
       <main className="mx-auto max-w-2xl px-4 py-5 pb-nav sm:pb-8">{children}</main>
 
-      {/* شريط التنقّل السفلي (موبايل فقط) */}
+      {/* Bottom navigation (mobile only) */}
       <nav
         className="glass-dock sm:hidden fixed bottom-0 inset-x-0 z-20 pb-[env(safe-area-inset-bottom)]"
         aria-label="Hauptnavigation"

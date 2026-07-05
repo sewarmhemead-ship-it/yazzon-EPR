@@ -1,7 +1,8 @@
 /**
  * database.js
- * الطبقة: test helper — تجهيز قاعدة الاختبار الحقيقية لاختبارات integration/stress.
- * يطبّق كل migrations بالترتيب حتى تبقى الاختبارات مطابقة للمخطط الحالي قبل الرفع.
+ * Test helper — prepares the real test database for integration suites.
+ * Applies every migration in order so tests always run against the current
+ * schema, not just the initial one.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -13,7 +14,7 @@ import { pool } from '../../src/config/db.js';
 const MIGRATIONS_DIR = fileURLToPath(new URL('../../migrations', import.meta.url));
 
 /**
- * يتحقق من توفر TEST_DATABASE_URL خلال مهلة قصيرة.
+ * Probes TEST_DATABASE_URL with a short timeout.
  * @returns {Promise<boolean>}
  */
 export async function canConnectToTestDatabase() {
@@ -32,21 +33,22 @@ export async function canConnectToTestDatabase() {
 }
 
 /**
- * محلياً: يطبع سبب تخطي اختبارات DB. في CI: يفشل صراحةً حتى لا تمر البوابة بلا integration.
- * @param {string} label اسم مجموعة الاختبار.
- * @param {string} message رسالة توضيحية.
+ * Locally: logs why database suites are being skipped. In CI: fails hard so
+ * the quality gate can never pass without the integration tests.
+ * @param {string} label Suite name.
+ * @param {string} message Explanation.
  */
 export function handleMissingTestDatabase(label, message) {
-  const text = `[${label}] TEST_DATABASE_URL غير متاحة — ${message}`;
+  const text = `[${label}] TEST_DATABASE_URL is not reachable — ${message}`;
   if (process.env.CI === 'true') {
-    throw new Error(`${text} داخل CI؛ لا يجوز تخطي اختبارات قاعدة البيانات قبل الرفع.`);
+    throw new Error(`${text} Database suites must not be skipped in CI.`);
   }
   console.warn(`\n${text}\n`);
 }
 
 /**
- * يعيد بناء مخطط الاختبار من الصفر عبر كل migrations الترقيمية.
- * السبب: أي migration جديد يجب أن يظهر في CI فوراً، لا أن تبقى الاختبارات على 001 فقط.
+ * Rebuilds the test schema from scratch by applying every numbered migration.
+ * Any new migration is therefore exercised by CI immediately.
  */
 export async function resetTestSchema() {
   await pool.query(`
@@ -70,7 +72,7 @@ export async function resetTestSchema() {
   }
 }
 
-/** ينظف بيانات الاختبار مع إبقاء المخطط كما هو. */
+/** Clears test data while keeping the schema intact. */
 export async function truncateCoreTables() {
   await pool.query(`
     TRUNCATE

@@ -1,25 +1,27 @@
 -- =============================================================================
 -- 001_init_schema.sql
--- الطبقة: migration — إنشاء مخطط قاعدة البيانات الأولي (القسم 4 من CLAUDE.md).
--- ملف ترقيمي: لا يُعدَّل بعد الدمج. أي تغيير لاحق = migration جديد (002_...).
+-- Layer: migration — initial database schema (CLAUDE.md section 4).
+-- Numbered file: never edited after merge. Later changes get a new migration.
 --
--- يفرض:
---   [INV-1] لا رصيد سالب أبداً  → CHECK (current_stock >= 0)
---   [INV-3] السجل ثابت          → transactions للقراءة/الإضافة فقط (يُفرَض في الكود؛
---            التصحيح = حركة عكسية عبر reverses_transaction_id، لا حذف/تعديل)
---   [INV-4] الكميات numeric      → لا float/real في أي عمود كمية
---   [INV-5] التواريخ timestamptz → كلها UTC، تُعرض بتوقيت Europe/Vienna في الواجهة
+-- Enforces:
+--   [INV-1] stock never negative        -> CHECK (current_stock >= 0)
+--   [INV-3] immutable ledger            -> transactions are insert-only
+--           (enforced in code; corrections reference the original row via
+--           reverses_transaction_id — never UPDATE/DELETE)
+--   [INV-4] quantities are numeric      -> no float/real on any quantity column
+--   [INV-5] timestamps are timestamptz  -> stored UTC, displayed Europe/Vienna
 -- =============================================================================
 
--- gen_random_uuid() مدمجة في PostgreSQL 13+ (وموجودة في Supabase). الحارس للأمان فقط.
+-- gen_random_uuid() is built into PostgreSQL 13+ (and Supabase); guard only.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- -----------------------------------------------------------------------------
 -- users
--- id يطابق معرّف مستخدم Supabase Auth (auth.users.id) ويُمرَّر صراحةً عند المزامنة.
--- ⚠️ لا DEFAULT على id عمداً: لو نسي الكود تمريره يفشل الإدراج بوضوح بدل توليد uuid
---    عشوائي لا يطابق هوية Auth (خطأ صامت يصعب تعقّبه في المرحلة 2).
--- الصلاحيات تُفرَض في Express middleware — RLS مُطفأة (القسم 2).
+-- id matches the Supabase Auth user id (auth.users.id) and is provided
+-- explicitly on sync. Intentionally no DEFAULT: if code forgets to pass the
+-- id, the insert fails loudly instead of silently generating a uuid that
+-- does not match the auth identity.
+-- Authorization is enforced in Express middleware — RLS is disabled (section 2).
 -- -----------------------------------------------------------------------------
 CREATE TABLE users (
   id         uuid        PRIMARY KEY,
@@ -30,7 +32,7 @@ CREATE TABLE users (
 );
 
 -- -----------------------------------------------------------------------------
--- categories — تصنيف بسيط للعناصر
+-- categories — simple item grouping
 -- -----------------------------------------------------------------------------
 CREATE TABLE categories (
   id   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -38,42 +40,46 @@ CREATE TABLE categories (
 );
 
 -- -----------------------------------------------------------------------------
--- items — المواد الخام. current_stock هو الرصيد الحيّ بالوحدة الأساسية [INV-6].
---   [INV-1] current_stock >= 0 يُدعَم على مستوى القاعدة كخطّ دفاع أخير؛
---           لكن الفرض الحقيقي هو الـ UPDATE الشرطي الذرّي في الـ service.
+-- items — raw materials. current_stock is the live balance in the item's
+-- base unit [INV-6].
+--   [INV-1] current_stock >= 0 is backed at the database level as a last line
+--           of defense; the real enforcement is the conditional atomic UPDATE
+--           in the service layer.
 -- -----------------------------------------------------------------------------
 CREATE TABLE items (
   id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   name            text        NOT NULL,
-  unit            text        NOT NULL,                       -- [INV-6] الوحدة الأساسية = وحدة الاستهلاك
+  unit            text        NOT NULL,                       -- [INV-6] base unit = consumption unit
   current_stock   numeric     NOT NULL DEFAULT 0 CHECK (current_stock >= 0),   -- [INV-1][INV-4]
   min_stock_level numeric     NOT NULL DEFAULT 1 CHECK (min_stock_level >= 0), -- [INV-4]
   category_id     uuid        REFERENCES categories(id),
-  is_ordered      boolean     NOT NULL DEFAULT false,         -- تم طلبه؟ (القسم 7: يفصل "مطلوب" عن "مطلوب وتم طلبه")
+  is_ordered      boolean     NOT NULL DEFAULT false,         -- separates "needed" from "needed and ordered" (section 7)
   last_ordered_at timestamptz                                 -- [INV-5] nullable
 );
 
 -- -----------------------------------------------------------------------------
--- transactions — السجل الثابت (Immutable Ledger) [INV-3].
---   quantity_change: موجب = إدخال، سالب = سحب. أنواعه: in | out | waste | adjustment.
---   created_at من السيرفر (now()) لا من العميل، لضمان ترتيب موثوق (القسم 7: النزاعات).
---   reverses_transaction_id: يشير للحركة الأصلية عند التصحيح (Undo) [INV-3].
+-- transactions — the immutable ledger [INV-3].
+--   quantity_change: positive = inflow, negative = outflow.
+--   Types: in | out | waste | adjustment.
+--   created_at comes from the server (now()), not the client, for a
+--   trustworthy chronological order (section 7, dispute resolution).
+--   reverses_transaction_id references the original movement on undo [INV-3].
 -- -----------------------------------------------------------------------------
 CREATE TABLE transactions (
   id                      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   item_id                 uuid        NOT NULL REFERENCES items(id),
   user_id                 uuid        NOT NULL REFERENCES users(id),
   type                    text        NOT NULL CHECK (type IN ('in', 'out', 'waste', 'adjustment')),
-  quantity_change         numeric     NOT NULL CHECK (quantity_change <> 0),   -- [INV-4] لا حركة صفرية
+  quantity_change         numeric     NOT NULL CHECK (quantity_change <> 0),   -- [INV-4] no zero movements
   note                    text,
-  created_at              timestamptz NOT NULL DEFAULT now(),                  -- [INV-5] من السيرفر
+  created_at              timestamptz NOT NULL DEFAULT now(),                  -- [INV-5] server time
   reverses_transaction_id uuid        REFERENCES transactions(id)             -- [INV-3] nullable
 );
 
 -- -----------------------------------------------------------------------------
--- فهارس
+-- Indexes
 -- -----------------------------------------------------------------------------
--- سجل حركات كل عنصر مرتّباً زمنياً (Undo لآخر حركة + التقارير مستقبلاً).
+-- Per-item movement history in chronological order (undo + future reports).
 CREATE INDEX idx_transactions_item_created ON transactions (item_id, created_at DESC);
--- تسريع استعلام التنبيهات اللحظي (القسم 10): العناصر عند/تحت حدّها الأدنى.
+-- Speeds up the live alert query (section 10): items at/below their minimum.
 CREATE INDEX idx_items_low_stock ON items (is_ordered) WHERE current_stock <= min_stock_level;

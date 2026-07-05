@@ -1,9 +1,12 @@
 /**
  * transactions.controller.js
- * الطبقة: controller — HTTP فقط: يقرأ الطلب، يستدعي الـ service، يعيد الرد. لا منطق أعمال.
- * userId يُؤخذ دائماً من req.user (الهوية الموثّقة) لا من جسم الطلب — لضمان ربط الحركة
- * بمنفّذها الحقيقي (القسم 7: حسم النزاعات)، ومنع انتحال الهوية.
- * الأخطاء تُمرَّر عبر next(err) إلى errorHandler المركزي (لا try/catch يبتلعها).
+ * Layer: controller — HTTP only: read the request, call the service, send the
+ * response. No business logic.
+ *
+ * userId always comes from req.user (the authenticated identity), never from
+ * the request body — movements must be tied to the real actor (section 7,
+ * dispute resolution) and impersonation must be impossible.
+ * Errors are forwarded to the central errorHandler via next(err).
  */
 
 import {
@@ -14,7 +17,7 @@ import {
   getTransactions,
 } from './transactions.service.js';
 
-/** سجل الحركات (فلاتر عبر query string). */
+/** Movement history with optional query-string filters. */
 export async function list(req, res, next) {
   try {
     const { itemId, locationId, type, limit } = req.query;
@@ -25,7 +28,7 @@ export async function list(req, res, next) {
   }
 }
 
-/** استلام كمية (in). */
+/** Goods receipt (in). */
 export async function receive(req, res, next) {
   try {
     const { itemId, quantity, note } = req.body ?? {};
@@ -36,7 +39,7 @@ export async function receive(req, res, next) {
   }
 }
 
-/** سحب كمية (out أو waste). */
+/** Withdrawal (out or waste). */
 export async function consume(req, res, next) {
   try {
     const { itemId, quantity, type, note } = req.body ?? {};
@@ -47,7 +50,7 @@ export async function consume(req, res, next) {
   }
 }
 
-/** تسوية جرد (adjustment). */
+/** Inventory adjustment. */
 export async function adjust(req, res, next) {
   try {
     const { itemId, delta, note } = req.body ?? {};
@@ -58,7 +61,7 @@ export async function adjust(req, res, next) {
   }
 }
 
-/** تراجع عن حركة سابقة (حركة عكسية). */
+/** Undo of a previous movement (reversal). */
 export async function undo(req, res, next) {
   try {
     const { note } = req.body ?? {};

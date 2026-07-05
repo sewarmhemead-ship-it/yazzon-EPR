@@ -1,9 +1,9 @@
 /**
  * verifySupabaseJwt.js
- * الطبقة: middleware helper — تحقق محلي من JWT الصادر من Supabase.
- * يدعم:
- *   - HS256 عبر SUPABASE_JWT_SECRET (النظام القديم).
- *   - ES256/RS256 عبر JWKS public keys (النظام الحديث).
+ * Layer: middleware helper — local verification of Supabase-issued JWTs.
+ * Supports both signing schemes:
+ *   - HS256 with SUPABASE_JWT_SECRET (legacy projects).
+ *   - ES256/RS256 with JWKS public keys (current projects).
  */
 
 import { createPublicKey } from 'node:crypto';
@@ -18,8 +18,11 @@ const JWKS_CACHE_MS = 10 * 60 * 1000;
 let jwksCache = null;
 let jwksFetchedAt = 0;
 
+/** Single generic failure so callers never leak why verification failed. */
+const invalidToken = () => new UnauthorizedError('Invalid or expired token');
+
 /**
- * يتحقق من JWT ويعيد payload بعد التحقق من التوقيع.
+ * Verifies a JWT and returns its payload.
  * @param {string} token
  * @returns {Promise<object>}
  * @throws {UnauthorizedError}
@@ -30,33 +33,33 @@ export async function verifySupabaseJwt(token) {
   const kid = decoded?.header?.kid;
 
   if (!alg) {
-    throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+    throw invalidToken();
   }
 
   if (HS_ALGORITHMS.includes(alg)) {
     if (!env.supabaseJwtSecret) {
-      throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+      throw invalidToken();
     }
     return verifyWithKey(token, env.supabaseJwtSecret, HS_ALGORITHMS);
   }
 
   if (JWKS_ALGORITHMS.includes(alg)) {
     if (!kid) {
-      throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+      throw invalidToken();
     }
     const jwk = await findJwkByKid(kid);
     const publicKey = createPublicKey({ key: jwk, format: 'jwk' });
     return verifyWithKey(token, publicKey, [alg]);
   }
 
-  throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+  throw invalidToken();
 }
 
 function verifyWithKey(token, key, algorithms) {
   try {
     return jwt.verify(token, key, { algorithms });
   } catch {
-    throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+    throw invalidToken();
   }
 }
 
@@ -64,7 +67,7 @@ async function findJwkByKid(kid) {
   const jwks = await loadJwks();
   const jwk = jwks.keys?.find((key) => key.kid === kid);
   if (!jwk) {
-    throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+    throw invalidToken();
   }
   return jwk;
 }
@@ -80,12 +83,12 @@ async function loadJwks() {
   }
 
   if (!env.supabaseJwksUrl) {
-    throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+    throw invalidToken();
   }
 
   const res = await fetch(env.supabaseJwksUrl);
   if (!res.ok) {
-    throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+    throw invalidToken();
   }
   const jwks = await res.json();
   jwksCache = jwks;
@@ -97,6 +100,6 @@ function parseJwks(raw) {
   try {
     return JSON.parse(raw);
   } catch {
-    throw new UnauthorizedError('توكن غير صالح أو منتهٍ');
+    throw invalidToken();
   }
 }
